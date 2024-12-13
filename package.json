@@ -1,0 +1,20 @@
+{
+  "name": "nodetoolforge",
+  "version": "1.0.0",
+  "main": "index.js",
+  "bin": {
+    "nodetoolforge": "bin/nodeforge.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "inquirer": "^12.2.0"
+  }
+}
