@@ -1,4 +1,4 @@
-function getBaseTemplate(templateName) {
+function getBaseTemplate(templateName, variant = 'default') {
     const templates = {
         'monorepo': {
             files: {
@@ -364,6 +364,16 @@ export const swaggerDocument: OpenAPIV3.Document = {
             }
         },
         'express-api': {
+            variants: {
+                minimal: {
+                    description: 'Basic Express.js API with essential features',
+                    features: ['basic-routing', 'error-handling']
+                },
+                full: {
+                    description: 'Full-featured Express.js API with all bells and whistles',
+                    features: ['swagger-docs', 'monitoring', 'security', 'testing']
+                }
+            },
             files: {
                 'src/index.js': `
 const express = require('express');

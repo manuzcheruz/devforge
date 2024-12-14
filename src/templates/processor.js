@@ -170,6 +170,17 @@ class TemplateProcessor {
 
     async processTemplate(templateContent, context = {}) {
         try {
+            // Handle template variants
+            if (context.variant && context.templateConfig?.variants?.[context.variant]) {
+                const variantConfig = context.templateConfig.variants[context.variant];
+                context = {
+                    ...context,
+                    features: {
+                        ...(context.features || {}),
+                        ...(variantConfig.features || {})
+                    }
+                };
+            }
             this.registerTemplateHelpers();
 
             if (!templateContent) {

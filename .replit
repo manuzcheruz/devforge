@@ -31,6 +31,10 @@ args = "Database Test"
 task = "workflow.run"
 args = "Template Test"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Template Variant Test"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -100,6 +104,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-template-project -t express-api"
+
+[[workflows.workflow]]
+name = "Template Variant Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-variant-project -t express-api --variant minimal"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]
