@@ -51,6 +51,10 @@ args = "Plugin System Test"
 task = "workflow.run"
 args = "Documentation Check"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Test Suite"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -190,6 +194,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cat README.md"
+
+[[workflows.workflow]]
+name = "Test Suite"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm test"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

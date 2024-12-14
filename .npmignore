@@ -1,0 +1,36 @@
+# Development files
+node_modules/
+.git/
+.github/
+test/
+tests/
+__tests__/
+*.test.js
+*.spec.js
+jest.config.js
+.eslintrc*
+.prettierrc*
+.editorconfig
+
+# Build artifacts
+dist/
+build/
+coverage/
+
+# Environment and local files
+.env*
+.nodeforge/
+*.log
+npm-debug.log*
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation source files
+docs/
+README.template.md
+CONTRIBUTING.md
+CHANGELOG.md
