@@ -5,16 +5,28 @@ class PluginManager {
             api: new Map(),
             microservices: new Map(),
             performance: new Map(),
-            security: new Map()
+            security: new Map(),
+            database: new Map()
         };
+        this.supportedCategories = new Set([
+            'environment',
+            'api',
+            'microservices',
+            'performance',
+            'security',
+            'database'
+        ]);
     }
 
     register(category, plugin) {
         if (!plugin.name || typeof plugin.execute !== 'function') {
             throw new Error('Invalid plugin format');
         }
+        if (!this.supportedCategories.has(category)) {
+            throw new Error(`Invalid category: ${category}. Supported categories are: ${Array.from(this.supportedCategories).join(', ')}`);
+        }
         if (!this.plugins[category]) {
-            throw new Error(`Invalid category: ${category}`);
+            this.plugins[category] = new Map();
         }
         this.plugins[category].set(plugin.name, plugin);
     }

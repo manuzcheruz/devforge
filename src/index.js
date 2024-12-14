@@ -16,6 +16,10 @@ class NodeForge {
         // Register API lifecycle plugin
         const apiLifecycle = require('./plugins/implementations/api-lifecycle');
         this.pluginManager.register('api', apiLifecycle);
+
+        // Register database management plugin
+        const prismaDatabase = require('./plugins/implementations/prisma-database');
+        this.pluginManager.register('database', prismaDatabase);
     }
 
     async createProject(options) {
@@ -77,6 +81,28 @@ class NodeForge {
     // Project Analysis
     async analyzeProject(projectPath) {
         return this.pluginManager.analyzeProject(projectPath);
+    }
+
+    // Database Management
+    async manageDatabase(options = {}) {
+        const action = options.migrate ? 'migrate' :
+                      options.seed ? 'seed' :
+                      options.backup ? 'backup' :
+                      options.restore ? 'restore' :
+                      null;
+
+        if (!action) {
+            throw new Error('No valid database action specified');
+        }
+
+        return this.pluginManager.applyPlugins('database', {
+            action,
+            context: {
+                projectPath: process.cwd(),
+                backupPath: options.backup === true ? undefined : options.backup,
+                restorePath: options.restore
+            }
+        });
     }
 }
 

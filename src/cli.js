@@ -93,6 +93,18 @@ class CLI {
             });
 
         this.program
+            .command('db')
+            .description('Manage database operations')
+            .option('-m, --migrate', 'Run database migrations')
+            .option('-s, --seed', 'Seed the database with initial data')
+            .option('-b, --backup [path]', 'Backup the database')
+            .option('-r, --restore <path>', 'Restore database from backup')
+            .action(async (options) => {
+                const nodeForge = require('./index');
+                await nodeForge.manageDatabase(options);
+            });
+
+        this.program
             .command('analyze')
             .description('Analyze project')
             .argument('[path]', 'Project path', '.')

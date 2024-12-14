@@ -42,6 +42,8 @@ async function createProjectStructure(projectPath, template) {
     const { exec } = require('child_process');
     const util = require('util');
     const execPromise = util.promisify(exec);
+    const { TemplateProcessor } = require('../templates/processor');
+    const templateProcessor = new TemplateProcessor();
     
     const startTime = logger.startOperation('Setting up project structure');
     
