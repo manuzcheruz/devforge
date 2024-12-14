@@ -20,6 +20,7 @@ class CLI {
             .description('Create a new Node.js project')
             .option('-t, --template <template>', 'Project template to use')
             .option('-n, --name <name>', 'Project name')
+            .option('-u, --template-url <url>', 'Remote template repository URL')
             .action(async (options) => {
                 const answers = await this.promptProjectDetails(options);
                 await createProject({ ...options, ...answers });
@@ -118,10 +119,30 @@ class CLI {
             },
             {
                 type: 'list',
+                name: 'templateType',
+                message: 'Select template source:',
+                choices: ['local', 'remote'],
+                when: !options.template && !options.templateUrl
+            },
+            {
+                type: 'list',
                 name: 'template',
                 message: 'Select a template:',
-                choices: ['express-api', 'react-app', 'cli-tool'],
-                when: !options.template
+                choices: ['express-api', 'react-app', 'cli-tool', 'monorepo'],
+                when: (answers) => !options.template && answers.templateType === 'local'
+            },
+            {
+                type: 'input',
+                name: 'templateUrl',
+                message: 'Enter template repository URL:',
+                when: (answers) => !options.templateUrl && answers.templateType === 'remote',
+                validate: (input) => {
+                    const gitUrlPattern = /^(https?:\/\/)?([\w.-]+)\/([^\/]+)\/([^\/]+)(\.git)?$/;
+                    if (!gitUrlPattern.test(input)) {
+                        return 'Please enter a valid Git repository URL';
+                    }
+                    return true;
+                }
             }
         ]);
     }

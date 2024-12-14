@@ -3,6 +3,7 @@ const path = require('path');
 const { logger } = require('../utils/logger');
 const { validateProjectName } = require('../utils/validator');
 const { getBaseTemplate } = require('../templates/base');
+const remoteTemplateManager = require('../templates/remote');
 
 async function createProject(options, pluginManager) {
     try {
@@ -19,7 +20,14 @@ async function createProject(options, pluginManager) {
         await fs.mkdir(projectPath, { recursive: true });
 
         // Get template content
-        const template = getBaseTemplate(options.template);
+        let template;
+        if (options.templateUrl) {
+            logger.info(`Using remote template from ${options.templateUrl}`);
+            template = await remoteTemplateManager.fetchTemplate(options.templateUrl);
+            template = await remoteTemplateManager.loadTemplateFiles(template);
+        } else {
+            template = getBaseTemplate(options.template);
+        }
 
         // Apply plugins
         if (pluginManager) {
@@ -30,7 +38,7 @@ async function createProject(options, pluginManager) {
         await createProjectStructure(projectPath, template);
 
         logger.success(`Project ${options.name} created successfully`);
-        return true;
+        return { success: true, projectPath };
     } catch (error) {
         logger.error(`Failed to create project: ${error.message}`);
         throw error;
@@ -180,7 +188,7 @@ async function createProjectStructure(projectPath, template) {
         
         process.chdir('..');
         logger.endOperation(startTime, 'Project setup completed');
-        return true;
+        return { success: true };
     } catch (error) {
         logger.error(`Failed to initialize project: ${error.message}`);
         // Attempt cleanup on failure

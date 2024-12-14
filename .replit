@@ -19,6 +19,10 @@ args = "CLI Test"
 task = "workflow.run"
 args = "CLI Test Create Project"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "CLI Test Remote"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -46,6 +50,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-project -t monorepo"
+
+[[workflows.workflow]]
+name = "CLI Test Remote"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project -u https://github.com/expressjs/express-starter.git"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]
