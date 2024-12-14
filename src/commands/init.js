@@ -103,7 +103,9 @@ async function createProjectStructure(projectPath, template) {
         
         if (dependencies.length > 0) {
             try {
+                logger.info('Installing dependencies...');
                 await execPromise(`npm install --save ${dependencies.join(' ')} --loglevel error`);
+                logger.success('Dependencies installed successfully');
             } catch (npmError) {
                 logger.error(`Failed to install dependencies: ${npmError.message}`);
                 throw npmError;
@@ -125,18 +127,37 @@ async function createProjectStructure(projectPath, template) {
             const gitStatus = await execPromise('git status');
             if (gitStatus) {
                 logger.info('Setting up git hooks...');
-                await execPromise('npx husky install');
-                await execPromise('npx husky add .husky/commit-msg "npx --no -- commitlint --edit $1"');
-                await execPromise('npx husky add .husky/pre-commit "npm run lint && npm run test"');
+                // Ensure husky is installed as a dev dependency first
+                await execPromise('npm install --save-dev husky@^8.0.3 @commitlint/cli@^17.0.0 @commitlint/config-conventional@^17.0.0 --loglevel error');
                 
-                logger.info('Creating commit lint configuration...');
-                await fs.writeFile(
-                    path.join(projectPath, 'commitlint.config.js'),
-                    'module.exports = {extends: ["@commitlint/config-conventional"]};' + '\n'
-                );
+                // Initialize husky with proper error handling
+                try {
+                    await execPromise('npx husky install');
+                    await execPromise('npm pkg set scripts.prepare="husky install"');
+                    
+                    // Create .husky directory explicitly
+                    const huskyDir = path.join(projectPath, '.husky');
+                    await fs.mkdir(huskyDir, { recursive: true });
+                    
+                    // Add hooks with proper permissions
+                    await execPromise('npx husky add .husky/commit-msg "npx --no -- commitlint --edit $1"');
+                    await execPromise('npx husky add .husky/pre-commit "npm run lint && npm run test"');
+                    await execPromise('chmod +x .husky/commit-msg .husky/pre-commit');
+                    
+                    logger.info('Creating commit lint configuration...');
+                    await fs.writeFile(
+                        path.join(projectPath, 'commitlint.config.js'),
+                        'module.exports = {extends: ["@commitlint/config-conventional"]};' + '\n'
+                    );
+                    
+                    logger.success('Git hooks setup completed successfully');
+                } catch (huskyError) {
+                    logger.warn(`Husky setup failed: ${huskyError.message}`);
+                    logger.info('Continuing with basic git configuration...');
+                }
             }
         } catch (hooksError) {
-            logger.warn('Git hooks setup failed, continuing without hooks...');
+            logger.warn(`Git hooks setup skipped: ${hooksError.message}`);
         }
         
         // Create README.md with project documentation

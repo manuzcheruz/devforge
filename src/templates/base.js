@@ -31,8 +31,7 @@ function getBaseTemplate(templateName) {
 export * from './validation';
 export * from './logger';
 export * from './monitoring';`,
-                'packages/shared/src/validation.ts': `
-import { z } from 'zod';
+                'packages/shared/src/validation.ts': `import { z } from 'zod';
 
 export const userSchema = z.object({
     id: z.number().optional(),
@@ -47,8 +46,7 @@ export type User = z.infer<typeof userSchema>;
 export const validateUser = (data: unknown): User => {
     return userSchema.parse(data);
 };`,
-                'packages/shared/src/logger.ts': `
-import pino from 'pino';
+                'packages/shared/src/logger.ts': `import pino from 'pino';
 
 export const logger = pino({
     level: process.env.LOG_LEVEL || 'info',
@@ -59,8 +57,7 @@ export const logger = pino({
         }
     }
 });`,
-                'packages/shared/src/monitoring.ts': `
-import { Counter, Histogram } from 'prom-client';
+                'packages/shared/src/monitoring.ts': `import { Counter, Histogram } from 'prom-client';
 
 export const httpRequestDuration = new Histogram({
     name: 'http_request_duration_seconds',
@@ -74,6 +71,29 @@ export const httpRequestTotal = new Counter({
     help: 'Total number of HTTP requests',
     labelNames: ['method', 'route', 'status_code'],
 });`,
+                'packages/shared/tsconfig.json': `{
+  "compilerOptions": {
+    "target": "es2019",
+    "module": "commonjs",
+    "declaration": true,
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}`,
+                'packages/shared/.eslintrc.js': `module.exports = {
+  parser: '@typescript-eslint/parser',
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended'
+  ],
+  plugins: ['@typescript-eslint'],
+  root: true
+};`,
                 'package.json': `{
   "name": "monorepo-root",
   "private": true,
