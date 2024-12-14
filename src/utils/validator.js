@@ -1,6 +1,42 @@
 function validateProjectName(name) {
     const validNameRegex = /^[a-zA-Z0-9-_]+$/;
-    return validNameRegex.test(name);
+    const reservedNames = ['node_modules', 'src', 'dist', 'build', 'test'];
+    
+    if (!validNameRegex.test(name)) {
+        throw new Error('Project name can only contain letters, numbers, hyphens, and underscores');
+    }
+    
+    if (reservedNames.includes(name.toLowerCase())) {
+        throw new Error(`'${name}' is a reserved name and cannot be used`);
+    }
+    
+    if (name.length > 214) {
+        throw new Error('Project name must be less than 214 characters');
+    }
+    
+    return true;
+}
+
+function validateTemplateContent(content) {
+    if (!content || typeof content !== 'string') {
+        throw new Error('Template content must be a non-empty string');
+    }
+
+    // Check for potential security issues in template content
+    const securityPatterns = [
+        /eval\s*\(/,
+        /new\s+Function\s*\(/,
+        /__proto__/,
+        /prototype\s*\[/
+    ];
+
+    for (const pattern of securityPatterns) {
+        if (pattern.test(content)) {
+            throw new Error('Template contains potentially unsafe content');
+        }
+    }
+
+    return true;
 }
 
 function validateConfig(config) {
@@ -45,10 +81,23 @@ function validateConfig(config) {
             throw new Error(`Dependencies for template '${name}' must be an object`);
         }
         
-        // Validate dependency versions
+        // Enhanced dependency version validation
         for (const [dep, version] of Object.entries(template.dependencies)) {
             if (!validPackageVersion.test(version)) {
                 throw new Error(`Invalid dependency version format for '${dep}' in template '${name}': ${version}`);
+            }
+            
+            // Check for security vulnerabilities in dependencies
+            if (version === '*' || version === 'latest') {
+                throw new Error(`Unsafe version '${version}' specified for dependency '${dep}' in template '${name}'. Please specify a fixed version or range.`);
+            }
+            
+            // Validate peer dependencies
+            if (template.peerDependencies && template.peerDependencies[dep]) {
+                const peerVersion = template.peerDependencies[dep];
+                if (!this.areVersionsCompatible(version, peerVersion)) {
+                    throw new Error(`Dependency version conflict: ${dep}@${version} is incompatible with peer requirement ${dep}@${peerVersion}`);
+                }
             }
         }
         
@@ -143,6 +192,28 @@ function validateConfig(config) {
                 const { testing } = template.features;
                 if (!testing.framework) {
                     throw new Error(`Testing framework must be specified in template '${name}'`);
+                }
+            }
+        }
+        
+        // Validate file paths and content types
+        if (template.files) {
+            for (const [filepath, content] of Object.entries(template.files)) {
+                // Check for directory traversal
+                if (filepath.includes('..') || filepath.startsWith('/')) {
+                    throw new Error(`Invalid file path in template '${name}': ${filepath}`);
+                }
+                
+                // Validate file extensions
+                const ext = path.extname(filepath).toLowerCase();
+                const allowedExtensions = ['.js', '.ts', '.json', '.md', '.yml', '.yaml', '.env'];
+                if (!allowedExtensions.includes(ext)) {
+                    throw new Error(`Unsupported file extension in template '${name}': ${ext}`);
+                }
+                
+                // Validate content
+                if (!validateTemplateContent(content)) {
+                    throw new Error(`Invalid content in template file: ${filepath}`);
                 }
             }
         }

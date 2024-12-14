@@ -371,8 +371,20 @@ const swaggerUi = require('swagger-ui-express');
 const OpenApiValidator = require('express-openapi-validator');
 const prometheus = require('prom-client');
 const morgan = require('morgan');
+const helmet = require('helmet');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Security middleware
+app.use(helmet());
+app.use(cors());
+app.use(rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+}));
 
 // Performance monitoring
 const collectDefaultMetrics = prometheus.collectDefaultMetrics;
@@ -380,7 +392,7 @@ collectDefaultMetrics();
 
 // Logging middleware
 app.use(morgan('combined'));
-app.use(express.json());
+app.use(express.json({ limit: '10kb' }));
 
 // API Documentation
 const swaggerDocument = require('./swagger.json');
@@ -393,6 +405,15 @@ app.use(OpenApiValidator.middleware({
     validateResponses: true
 }));
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
 // Metrics endpoint for monitoring
 app.get('/metrics', async (req, res) => {
     res.set('Content-Type', prometheus.register.contentType);
@@ -401,21 +422,37 @@ app.get('/metrics', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-    res.json({ message: 'Welcome to the API' });
+    res.json({ 
+        message: 'Welcome to the API',
+        version: process.env.npm_package_version,
+        documentation: '/api-docs'
+    });
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err);
+    // Don't expose internal error details in production
+    const isProduction = process.env.NODE_ENV === 'production';
     res.status(err.status || 500).json({
-        message: err.message,
-        errors: err.errors
+        status: 'error',
+        message: isProduction ? 'Internal server error' : err.message,
+        ...(isProduction ? {} : { errors: err.errors })
     });
 });
 
-app.listen(port, () => {
-    console.log(\`Server running on port \${port}\`);
-    console.log(\`API Documentation available at http://localhost:\${port}/api-docs\`);
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('Received SIGTERM. Performing graceful shutdown...');
+    server.close(() => {
+        console.log('Server closed. Exiting process.');
+        process.exit(0);
+    });
+});
+
+const server = app.listen(port, '0.0.0.0', () => {
+    console.log(\`Server running on http://0.0.0.0:\${port}\`);
+    console.log(\`API Documentation available at http://0.0.0.0:\${port}/api-docs\`);
 });`,
                 'src/routes/index.js': `
 const express = require('express');
@@ -423,6 +460,10 @@ const router = express.Router();
 
 module.exports = router;`,
                 'package.json': `{
+  "name": "express-api",
+  "version": "1.0.0",
+  "description": "Express API with security, monitoring, and development best practices",
+  "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
@@ -430,7 +471,33 @@ module.exports = router;`,
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write '**/*.{js,json,md}'",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "audit": "npm audit --audit-level=high",
+    "docs": "jsdoc -c jsdoc.json"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "swagger-ui-express": "^5.0.0",
+    "express-openapi-validator": "^5.0.6",
+    "prom-client": "^15.0.0",
+    "morgan": "^1.10.0",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.1.5",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.1.1",
+    "husky": "^8.0.3",
+    "jsdoc": "^4.0.2",
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3"
   }
 }`,
                 '.env.example': `
