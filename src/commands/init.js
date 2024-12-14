@@ -20,14 +20,7 @@ async function createProject(options, pluginManager) {
         await fs.mkdir(projectPath, { recursive: true });
 
         // Get template content
-        let template;
-        if (options.templateUrl) {
-            logger.info(`Using remote template from ${options.templateUrl}`);
-            template = await remoteTemplateManager.fetchTemplate(options.templateUrl);
-            template = await remoteTemplateManager.loadTemplateFiles(template);
-        } else {
-            template = getBaseTemplate(options.template);
-        }
+        const template = getBaseTemplate(options.template);
 
         // Apply plugins
         if (pluginManager) {

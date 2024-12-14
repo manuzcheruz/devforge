@@ -6,7 +6,21 @@ const { defaultConfig } = require('../config/defaults');
 
 class RemoteTemplateManager {
     constructor() {
-        this.tempDir = path.join(process.cwd(), '.nodeforge', 'templates');
+        // Use absolute path for temp directory
+        this.tempDir = path.resolve(process.cwd(), '.nodeforge', 'templates');
+        // Ensure temp directory exists on initialization
+        this.initTempDir().catch(error => {
+            logger.error(`Failed to initialize temp directory: ${error.message}`);
+        });
+    }
+
+    async initTempDir() {
+        try {
+            await fs.mkdir(this.tempDir, { recursive: true });
+            logger.info(`Initialized temp directory at: ${this.tempDir}`);
+        } catch (error) {
+            throw new Error(`Failed to create temp directory: ${error.message}`);
+        }
     }
 
     async fetchTemplate(repositoryUrl) {
@@ -32,6 +46,29 @@ class RemoteTemplateManager {
         }
     }
 
+    isValidGitUrl(url) {
+        const gitUrlPattern = /^(https?:\/\/)?([\w.-]+)\/([^\/]+)\/([^\/]+)(\.git)?$/;
+        return gitUrlPattern.test(url);
+    }
+
+    getAuthenticatedUrl(repositoryUrl) {
+        const isGitHubUrl = /github\.com/.test(repositoryUrl);
+        const gitToken = process.env.GITHUB_TOKEN;
+        
+        if (isGitHubUrl && gitToken) {
+            const urlParts = repositoryUrl.split('://');
+            return {
+                cloneUrl: `https://${gitToken}@${urlParts[1]}`,
+                authType: 'token'
+            };
+        }
+        
+        return {
+            cloneUrl: repositoryUrl,
+            authType: 'anonymous'
+        };
+    }
+
     getRepoName(repositoryUrl) {
         const urlParts = repositoryUrl.split('/');
         const repoName = urlParts[urlParts.length - 1].replace('.git', '');
@@ -40,31 +77,37 @@ class RemoteTemplateManager {
 
     async cloneRepository(repositoryUrl, targetDir) {
         try {
+            logger.info(`Starting repository clone process for ${repositoryUrl}`);
+            
             // Remove existing directory if it exists
             await fs.rm(targetDir, { recursive: true, force: true });
             
-            // Parse repository URL
-            const isGitHubUrl = /github\.com/.test(repositoryUrl);
-            const gitToken = process.env.GITHUB_TOKEN;
-            
-            let cloneUrl = repositoryUrl;
-            if (isGitHubUrl && gitToken) {
-                const urlParts = repositoryUrl.split('://');
-                cloneUrl = `https://${gitToken}@${urlParts[1]}`;
-                logger.info('Using authenticated GitHub URL');
+            // Parse repository URL and ensure it's a valid Git URL
+            if (!this.isValidGitUrl(repositoryUrl)) {
+                throw new Error('Invalid Git repository URL');
             }
-
+            
+            // Setup authentication if needed
+            const { cloneUrl, authType } = this.getAuthenticatedUrl(repositoryUrl);
+            logger.info(`Using ${authType} authentication`);
+            
+            // Create parent directory
+            await fs.mkdir(path.dirname(targetDir), { recursive: true });
+            
             // Try shallow clone first (faster)
             logger.info('Attempting shallow clone...');
             try {
-                execSync(`git clone --depth 1 ${cloneUrl} ${targetDir}`, {
-                    stdio: 'inherit',
-                    timeout: 60000 // 60s timeout for initial attempt
+                const output = execSync(`git clone --depth 1 ${cloneUrl} "${targetDir}"`, {
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                    encoding: 'utf8',
+                    timeout: 30000 // 30s timeout for initial attempt
                 });
+                logger.info(`Clone output: ${output}`);
                 logger.success('Repository cloned successfully (shallow)');
                 return;
             } catch (error) {
-                logger.warn('Shallow clone failed, falling back to full clone...');
+                logger.warn(`Shallow clone failed: ${error.message}`);
+                if (error.stderr) logger.warn(`Error details: ${error.stderr}`);
                 await fs.rm(targetDir, { recursive: true, force: true });
             }
 
@@ -72,23 +115,39 @@ class RemoteTemplateManager {
             const maxRetries = 3;
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    const timeout = attempt * 60000; // Increase timeout with each attempt
-                    logger.info(`Clone attempt ${attempt}/${maxRetries} (timeout: ${timeout/1000}s)...`);
+                    const timeout = attempt * 45000; // 45s timeout, increases with each attempt
+                    logger.info(`Full clone attempt ${attempt}/${maxRetries} (timeout: ${timeout/1000}s)...`);
                     
-                    execSync(`git clone ${cloneUrl} ${targetDir}`, {
-                        stdio: 'inherit',
+                    const output = execSync(`git clone ${cloneUrl} "${targetDir}"`, {
+                        stdio: ['pipe', 'pipe', 'pipe'],
+                        encoding: 'utf8',
                         timeout
                     });
+                    logger.info(`Clone output: ${output}`);
                     
-                    logger.success('Repository cloned successfully');
+                    // Verify the clone was successful by checking if the directory contains files
+                    const files = await fs.readdir(targetDir);
+                    if (files.length === 0) {
+                        throw new Error('Repository appears to be empty');
+                    }
+                    
+                    logger.success('Repository cloned successfully (full)');
                     return;
                 } catch (error) {
+                    const errorMsg = error.message.toLowerCase();
+                    if (error.stderr) logger.warn(`Error details: ${error.stderr}`);
+                    
+                    if (errorMsg.includes('authentication') || errorMsg.includes('403')) {
+                        throw new Error('Authentication failed. Please check your credentials.');
+                    }
+                    
                     if (attempt === maxRetries) {
                         throw error;
                     }
-                    logger.warn(`Attempt ${attempt} failed, retrying...`);
+                    
+                    logger.warn(`Attempt ${attempt} failed: ${error.message}`);
                     await fs.rm(targetDir, { recursive: true, force: true });
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
+                    await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
                 }
             }
         } catch (error) {

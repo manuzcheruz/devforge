@@ -49,7 +49,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-project -t monorepo"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-local-project -t express-api"
 
 [[workflows.workflow]]
 name = "CLI Test Remote"
