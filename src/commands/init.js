@@ -19,8 +19,18 @@ async function createProject(options, pluginManager) {
         // Create project directory
         await fs.mkdir(projectPath, { recursive: true });
 
-        // Get template content
-        const template = getBaseTemplate(options.template);
+        let template;
+        // Handle remote template if URL is provided
+        if (options.templateUrl) {
+            logger.info(`Fetching remote template from: ${options.templateUrl}`);
+            template = await remoteTemplateManager.fetchTemplate(options.templateUrl);
+            
+            // Load template files after fetching
+            template = await remoteTemplateManager.loadTemplateFiles(template);
+        } else {
+            // Get local template content
+            template = getBaseTemplate(options.template);
+        }
 
         // Apply plugins
         if (pluginManager) {
@@ -30,9 +40,20 @@ async function createProject(options, pluginManager) {
         // Create project structure
         await createProjectStructure(projectPath, template);
 
+        // Cleanup remote template files if necessary
+        if (options.templateUrl) {
+            await remoteTemplateManager.cleanup();
+        }
+
         logger.success(`Project ${options.name} created successfully`);
         return { success: true, projectPath };
     } catch (error) {
+        // Cleanup on error for remote templates
+        if (options.templateUrl) {
+            await remoteTemplateManager.cleanup().catch(cleanupError => {
+                logger.warn(`Failed to cleanup remote template: ${cleanupError.message}`);
+            });
+        }
         logger.error(`Failed to create project: ${error.message}`);
         throw error;
     }

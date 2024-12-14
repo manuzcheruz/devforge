@@ -55,6 +55,22 @@ args = "Documentation Check"
 task = "workflow.run"
 args = "Test Suite"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "CLI Help Test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Environment Check"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Template Basic Test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Remote Template Test"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -208,6 +224,62 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm test"
+
+[[workflows.workflow]]
+name = "CLI Help Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js --help"
+
+[[workflows.workflow]]
+name = "Environment Check"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js env --check"
+
+[[workflows.workflow]]
+name = "Template Basic Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-basic-project -t express-api -v minimal --vars \"port=3000,useTypescript=false\""
+
+[[workflows.workflow]]
+name = "Remote Template Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/express-starter.git"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

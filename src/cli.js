@@ -21,6 +21,7 @@ class CLI {
             .option('-t, --template <template>', 'Project template to use')
             .option('-n, --name <name>', 'Project name')
             .option('-v, --variant <variant>', 'Template variant to use (e.g., minimal, full)')
+            .option('--url <url>', 'Remote template repository URL')
             .option('--vars <variables>', 'Template variables in key=value format, comma separated')
             .action(async (options) => {
                 // Parse and validate variables from CLI
@@ -37,11 +38,14 @@ class CLI {
                     ) : 
                     {};
                 const answers = await this.promptProjectDetails(options);
-                await createProject({ 
-                    ...options, 
+                const projectConfig = {
+                    ...options,
                     ...answers,
-                    variables: parsedVars 
-                });
+                    variables: parsedVars,
+                    isRemote: !!options.url,
+                    templateUrl: options.url
+                };
+                await createProject(projectConfig);
             });
 
         this.program
