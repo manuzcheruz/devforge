@@ -18,34 +18,56 @@ class PluginManager {
         ]);
         this.dependencies = new Map(); // Track plugin dependencies
         this.lifecycleHooks = new Map(); // Store plugin lifecycle hooks
+        this.pluginRegistry = new Map(); // Store plugin metadata
+        this.versionCache = new Map(); // Cache resolved versions
     }
 
-    register(category, plugin) {
-        // Validate plugin structure
-        this.validatePlugin(plugin);
-        
-        // Check category
-        if (!this.supportedCategories.has(category)) {
-            throw new Error(`Invalid category: ${category}. Supported categories are: ${Array.from(this.supportedCategories).join(', ')}`);
-        }
+    async register(category, plugin) {
+        try {
+            // Validate plugin structure
+            this.validatePlugin(plugin);
+            
+            // Check category
+            if (!this.supportedCategories.has(category)) {
+                throw new Error(`Invalid category: ${category}. Supported categories are: ${Array.from(this.supportedCategories).join(', ')}`);
+            }
 
-        // Initialize category if needed
-        if (!this.plugins[category]) {
-            this.plugins[category] = new Map();
-        }
+            // Initialize category if needed
+            if (!this.plugins[category]) {
+                this.plugins[category] = new Map();
+            }
 
-        // Store plugin dependencies
-        if (plugin.dependencies) {
-            this.dependencies.set(plugin.name, plugin.dependencies);
-        }
+            // Validate version and update registry
+            if (!this.validateVersion(plugin.version)) {
+                throw new Error(`Invalid version format for plugin ${plugin.name}: ${plugin.version}`);
+            }
 
-        // Register lifecycle hooks if present
-        if (plugin.hooks) {
-            this.lifecycleHooks.set(plugin.name, plugin.hooks);
-        }
+            // Store plugin metadata
+            this.pluginRegistry.set(plugin.name, {
+                category,
+                version: plugin.version,
+                capabilities: plugin.capabilities || {},
+                lastUpdated: new Date()
+            });
 
-        // Register the plugin
-        this.plugins[category].set(plugin.name, plugin);
+            // Store plugin dependencies
+            if (plugin.dependencies) {
+                this.dependencies.set(plugin.name, plugin.dependencies);
+            }
+
+            // Register lifecycle hooks if present
+            if (plugin.hooks) {
+                this.lifecycleHooks.set(plugin.name, plugin.hooks);
+            }
+
+            // Register the plugin
+            this.plugins[category].set(plugin.name, plugin);
+
+            return true;
+        } catch (error) {
+            console.error(`Failed to register plugin ${plugin.name}:`, error);
+            throw error;
+        }
     }
 
     validatePlugin(plugin) {
@@ -153,7 +175,100 @@ class PluginManager {
         }
         return results;
     }
+    // Plugin discovery and loading
+    async discoverPlugins(pluginPath) {
+        try {
+            const fs = require('fs').promises;
+            const path = require('path');
+            const files = await fs.readdir(pluginPath);
+            
+            for (const file of files) {
+                if (file.endsWith('.js')) {
+                    const fullPath = path.join(pluginPath, file);
+                    try {
+                        const plugin = require(fullPath);
+                        
+                        // Validate plugin structure
+                        if (this.validatePlugin(plugin)) {
+                            const category = this.detectPluginCategory(plugin);
+                            if (category) {
+                                await this.register(category, plugin); // Use await here
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Failed to load plugin from ${fullPath}:`, error);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Plugin discovery failed:', error);
+            throw error;
+        }
+    }
 
+    detectPluginCategory(plugin) {
+        if (plugin.type && this.supportedCategories.has(plugin.type)) {
+            return plugin.type;
+        }
+        // Fallback detection based on capabilities
+        if (plugin.capabilities) {
+            if (plugin.capabilities.syncNodeVersion) return 'environment';
+            if (plugin.capabilities.design || plugin.capabilities.mock) return 'api';
+            if (plugin.capabilities.migrations) return 'database';
+        }
+        return null;
+    }
+
+    validateVersion(version) {
+        const semver = require('semver');
+        return semver.valid(version) !== null;
+    }
+
+    async resolvePluginDependencies(pluginName) {
+        const visited = new Set();
+        const resolved = new Map();
+
+        const resolve = async (name, requiredVersion) => {
+            if (visited.has(name)) {
+                return resolved.get(name);
+            }
+
+            visited.add(name);
+            const plugin = this.findPluginByName(name);
+            
+            if (!plugin) {
+                throw new Error(`Plugin ${name} not found`);
+            }
+
+            if (requiredVersion && !this.isVersionCompatible(plugin.version, requiredVersion)) {
+                throw new Error(`Version mismatch for ${name}: requires ${requiredVersion}, found ${plugin.version}`);
+            }
+
+            const dependencies = this.dependencies.get(name) || [];
+            for (const dep of dependencies) {
+                await resolve(dep.name, dep.version);
+            }
+
+            resolved.set(name, plugin);
+            return plugin;
+        };
+
+        return resolve(pluginName);
+    }
+
+    isVersionCompatible(actual, required) {
+        const semver = require('semver');
+        return semver.satisfies(actual, required);
+    }
+
+    findPluginByName(name) {
+        for (const category of Object.values(this.plugins)) {
+            if (category.has(name)) {
+                return category.get(name);
+            }
+        }
+        return null;
+    }
     compareVersions(v1, v2) {
         const normalize = v => v.split('.').map(Number);
         const [a1, a2, a3] = normalize(v1);

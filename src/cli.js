@@ -20,9 +20,28 @@ class CLI {
             .description('Create a new Node.js project')
             .option('-t, --template <template>', 'Project template to use')
             .option('-n, --name <name>', 'Project name')
+            .option('-v, --variant <variant>', 'Template variant to use (e.g., minimal, full)')
+            .option('--vars <variables>', 'Template variables in key=value format, comma separated')
             .action(async (options) => {
+                // Parse and validate variables from CLI
+                const parsedVars = options.vars ? 
+                    Object.fromEntries(
+                        options.vars.split(',')
+                        .map(pair => {
+                            const [key, value] = pair.split('=');
+                            if (!key || value === undefined) {
+                                throw new Error(`Invalid variable format: ${pair}. Use key=value format.`);
+                            }
+                            return [key.trim(), value.trim()];
+                        })
+                    ) : 
+                    {};
                 const answers = await this.promptProjectDetails(options);
-                await createProject({ ...options, ...answers });
+                await createProject({ 
+                    ...options, 
+                    ...answers,
+                    variables: parsedVars 
+                });
             });
 
         this.program
@@ -117,11 +136,42 @@ class CLI {
     }
 
     async promptProjectDetails(options) {
-        if (options.name && options.template) {
+        const templates = {
+            'express-api': {
+                variants: ['minimal', 'full'],
+                variables: {
+                    port: '3000',
+                    useTypescript: 'false',
+                    includeDocs: 'true'
+                }
+            },
+            'react-app': {
+                variants: ['basic', 'full'],
+                variables: {
+                    port: '3000',
+                    includeRouter: 'false',
+                    useTypescript: 'false'
+                }
+            },
+            'cli-tool': {
+                variants: ['basic'],
+                variables: {
+                    binName: 'cli'
+                }
+            },
+            'monorepo': {
+                variants: ['default'],
+                variables: {
+                    includeShared: 'true'
+                }
+            }
+        };
+
+        if (options.name && options.template && options.variant && options.vars) {
             return options;
         }
 
-        return inquirer.prompt([
+        const answers = await inquirer.prompt([
             {
                 type: 'input',
                 name: 'name',
@@ -132,10 +182,55 @@ class CLI {
                 type: 'list',
                 name: 'template',
                 message: 'Select a template:',
-                choices: ['express-api', 'react-app', 'cli-tool', 'monorepo'],
+                choices: Object.keys(templates),
                 when: !options.template
             }
         ]);
+
+        const selectedTemplate = options.template || answers.template;
+        const templateConfig = templates[selectedTemplate];
+        
+        if (!options.variant && templateConfig.variants?.length > 0) {
+            const variantAnswer = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'variant',
+                    message: 'Select template variant:',
+                    choices: templateConfig.variants,
+                    default: templateConfig.variants[0]
+                }
+            ]);
+            answers.variant = variantAnswer.variant;
+        } else if (options.variant) {
+            // Validate the provided variant
+            if (!templateConfig.variants?.includes(options.variant)) {
+                logger.error(`Invalid variant '${options.variant}' for template '${selectedTemplate}'`);
+                logger.info(`Available variants: ${templateConfig.variants?.join(', ') || 'none'}`);
+                process.exit(1);
+            }
+            answers.variant = options.variant;
+        }
+
+        // Prompt for template variables if not provided via CLI
+        if (!options.vars) {
+            const variablePrompts = Object.entries(templateConfig.variables).map(([key, defaultValue]) => ({
+                type: typeof defaultValue === 'boolean' ? 'confirm' : 'input',
+                name: `variables.${key}`,
+                message: `Enter value for ${key}:`,
+                default: defaultValue,
+            }));
+
+            const variableAnswers = await inquirer.prompt(variablePrompts);
+            
+            // Convert dot notation answers to nested object
+            answers.variables = Object.entries(variableAnswers).reduce((vars, [key, value]) => {
+                const varName = key.split('.')[1];
+                vars[varName] = value;
+                return vars;
+            }, {});
+        }
+
+        return { ...options, ...answers };
     }
 
     run(args) {

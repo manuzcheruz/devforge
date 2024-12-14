@@ -35,6 +35,18 @@ args = "Template Test"
 task = "workflow.run"
 args = "Template Variant Test"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "CLI Test Variables"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Plugin Test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Plugin System Test"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -117,7 +129,49 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-variant-project -t express-api --variant minimal"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-variant-project -t express-api -v minimal --vars \"port=4000,useTypescript=true\""
+
+[[workflows.workflow]]
+name = "CLI Test Variables"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-var-project -t express-api -v minimal --vars \"port=4000,useTypescript=true,includeTests=true,serverName=dev-server\""
+
+[[workflows.workflow]]
+name = "Plugin Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-plugin-project -t express-api -v full"
+
+[[workflows.workflow]]
+name = "Plugin System Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js analyze"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

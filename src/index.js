@@ -8,18 +8,32 @@ class NodeForge {
         this.registerCorePlugins();
     }
 
-    registerCorePlugins() {
-        // Register environment sync plugin
-        const environmentSync = require('./plugins/implementations/environment-sync');
-        this.pluginManager.register('environment', environmentSync);
+    async registerCorePlugins() {
+        try {
+            // Register built-in plugins
+            const environmentSync = require('./plugins/implementations/environment-sync');
+            const prismaDatabase = require('./plugins/implementations/prisma-database');
 
-        // Register API lifecycle plugin
-        const apiLifecycle = require('./plugins/implementations/api-lifecycle');
-        this.pluginManager.register('api', apiLifecycle);
+            // Register core plugins with proper dependency order
+            await this.pluginManager.register('environment', environmentSync);
+            await this.pluginManager.register('database', prismaDatabase);
 
-        // Register database management plugin
-        const prismaDatabase = require('./plugins/implementations/prisma-database');
-        this.pluginManager.register('database', prismaDatabase);
+            // Discover and load additional plugins from the plugins directory
+            const path = require('path');
+            const pluginsPath = path.join(__dirname, 'plugins', 'implementations');
+            await this.pluginManager.discoverPlugins(pluginsPath);
+
+            // Resolve dependencies for all registered plugins
+            const plugins = this.pluginManager.listPlugins();
+            for (const category in plugins) {
+                for (const pluginName of plugins[category]) {
+                    await this.pluginManager.resolvePluginDependencies(pluginName);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to register core plugins:', error);
+            throw error;
+        }
     }
 
     async createProject(options) {
