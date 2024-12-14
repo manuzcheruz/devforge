@@ -37,6 +37,71 @@ class CLI {
                     console.log(config);
                 }
             });
+
+        this.program
+            .command('env')
+            .description('Manage development environment synchronization')
+            .option('-s, --sync', 'Synchronize development environment')
+            .option('-c, --check', 'Check environment consistency')
+            .action(async (options) => {
+                const nodeForge = require('./index');
+                await nodeForge.syncEnvironment(options);
+            });
+
+        this.program
+            .command('api')
+            .description('Manage API development lifecycle')
+            .option('-d, --design', 'Design API endpoints')
+            .option('-m, --mock', 'Generate API mocks')
+            .option('-t, --test', 'Run API tests')
+            .action(async (options) => {
+                const nodeForge = require('./index');
+                await nodeForge.manageAPI(options);
+            });
+
+        this.program
+            .command('microservices')
+            .description('Manage microservices development')
+            .option('-i, --init', 'Initialize microservice')
+            .option('-r, --run', 'Run microservices locally')
+            .option('-d, --deploy', 'Deploy microservices')
+            .action(async (options) => {
+                const nodeForge = require('./index');
+                await nodeForge.manageMicroservices(options);
+            });
+
+        this.program
+            .command('optimize')
+            .description('Optimize application performance')
+            .option('-a, --analyze', 'Analyze performance')
+            .option('-b, --bundle', 'Optimize bundle size')
+            .option('-m, --memory', 'Check memory usage')
+            .action(async (options) => {
+                const nodeForge = require('./index');
+                await nodeForge.optimizePerformance(options);
+            });
+
+        this.program
+            .command('security')
+            .description('Manage security and compliance')
+            .option('-s, --scan', 'Run security scan')
+            .option('-l, --licenses', 'Check licenses')
+            .option('-v, --vulnerabilities', 'Check vulnerabilities')
+            .action(async (options) => {
+                const nodeForge = require('./index');
+                await nodeForge.analyzeSecurity(options);
+            });
+
+        this.program
+            .command('analyze')
+            .description('Analyze project')
+            .argument('[path]', 'Project path', '.')
+            .action(async (path) => {
+                const nodeForge = require('./index');
+                const analysis = await nodeForge.analyzeProject(path);
+                logger.info('Project analysis complete');
+                console.log(analysis);
+            });
     }
 
     async promptProjectDetails(options) {

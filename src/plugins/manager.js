@@ -1,24 +1,64 @@
 class PluginManager {
     constructor() {
-        this.plugins = new Map();
+        this.plugins = {
+            environment: new Map(),
+            api: new Map(),
+            microservices: new Map(),
+            performance: new Map(),
+            security: new Map()
+        };
     }
 
-    register(plugin) {
+    register(category, plugin) {
         if (!plugin.name || typeof plugin.execute !== 'function') {
             throw new Error('Invalid plugin format');
         }
-        this.plugins.set(plugin.name, plugin);
-    }
-
-    async applyPlugins(template) {
-        for (const plugin of this.plugins.values()) {
-            await plugin.execute(template);
+        if (!this.plugins[category]) {
+            throw new Error(`Invalid category: ${category}`);
         }
-        return template;
+        this.plugins[category].set(plugin.name, plugin);
     }
 
-    getPlugin(name) {
-        return this.plugins.get(name);
+    async applyPlugins(category, context) {
+        if (!this.plugins[category]) {
+            throw new Error(`Invalid category: ${category}`);
+        }
+        
+        const results = [];
+        for (const plugin of this.plugins[category].values()) {
+            try {
+                const result = await plugin.execute(context);
+                results.push({ plugin: plugin.name, success: true, result });
+            } catch (error) {
+                results.push({ plugin: plugin.name, success: false, error: error.message });
+            }
+        }
+        return results;
+    }
+
+    getPlugin(category, name) {
+        return this.plugins[category]?.get(name);
+    }
+
+    listPlugins(category) {
+        if (!category) {
+            return Object.entries(this.plugins).reduce((acc, [cat, plugins]) => {
+                acc[cat] = Array.from(plugins.keys());
+                return acc;
+            }, {});
+        }
+        return Array.from(this.plugins[category]?.keys() || []);
+    }
+
+    async analyzeProject(projectPath) {
+        const context = { projectPath };
+        const analysis = {};
+        
+        for (const category of Object.keys(this.plugins)) {
+            analysis[category] = await this.applyPlugins(category, context);
+        }
+        
+        return analysis;
     }
 }
 
