@@ -1,6 +1,6 @@
-# Contributing to NodeForge
+# Contributing to NodeSmith
 
-First off, thank you for considering contributing to NodeForge! It's people like you that make NodeForge such a great tool.
+First off, thank you for considering contributing to NodeSmith! It's people like you that make NodeSmith such a great tool.
 
 ## Code of Conduct
 
@@ -10,7 +10,7 @@ This project and everyone participating in it is governed by our Code of Conduct
 
 ### Reporting Bugs
 
-This section guides you through submitting a bug report for NodeForge.
+This section guides you through submitting a bug report for NodeSmith.
 
 Before creating bug reports, please check the issue list as you might find out that you don't need to create one. When you are creating a bug report, please include as many details as possible:
 
@@ -23,7 +23,7 @@ Before creating bug reports, please check the issue list as you might find out t
 
 ### Suggesting Enhancements
 
-This section guides you through submitting an enhancement suggestion for NodeForge, including completely new features and minor improvements to existing functionality.
+This section guides you through submitting an enhancement suggestion for NodeSmith, including completely new features and minor improvements to existing functionality.
 
 Before creating enhancement suggestions, please check the issue list as you might find out that you don't need to create one. When you are creating an enhancement suggestion, please include as many details as possible:
 

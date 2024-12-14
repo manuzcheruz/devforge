@@ -38,6 +38,6 @@ Thumbs.db
 # Test coverage
 coverage/
 
-# NodeForge specific
-.nodeforge/
+# NodeSmith specific
+.nodesmith/
 templates/**/node_modules/
