@@ -74,33 +74,39 @@ class ProjectAnalyzer {
             const [structure, dependencies, security, quality, performance, complexity] = 
                 await Promise.all(analysisPromises);
 
-            const recommendations = {
-                documentation: [],
-                quality: [],
-                security: [],
-                performance: [],
-                complexity: []
+            // Initialize documentation metrics with defaults
+            const documentation = await this.qualityAnalyzer.analyzeDocumentation(normalizedPath, fs) || {
+                hasReadme: false,
+                hasApiDocs: false,
+                readmeQuality: 0,
+                coverage: 0,
+                issues: []
             };
 
-            // Generate recommendations based on metrics
-            this.generateRecommendations(
-                { structure, dependencies, security, quality, performance, complexity },
-                recommendations
-            );
+            const analysisResults = {
+                structure,
+                dependencies,
+                security,
+                quality: {
+                    ...quality,
+                    documentation: documentation || {
+                        hasReadme: false,
+                        hasApiDocs: false,
+                        readmeQuality: 0,
+                        coverage: 0,
+                        issues: []
+                    }
+                },
+                performance,
+                complexity
+            };
+
+            const projectRecommendations = this.generateRecommendations(analysisResults);
 
             return {
                 status: 'success',
-                metrics: {
-                    structure,
-                    dependencies,
-                    security,
-                    quality,
-                    performance,
-                    complexity
-                },
-                recommendations: Object.values(recommendations).some(arr => arr.length > 0) 
-                    ? recommendations 
-                    : undefined,
+                metrics: analysisResults,
+                recommendations: projectRecommendations,
                 timestamp: new Date().toISOString(),
                 projectPath: normalizedPath,
                 sourceFiles: sourceFiles.length
@@ -111,29 +117,117 @@ class ProjectAnalyzer {
         }
     }
 
+    generateRecommendations(metrics = {}) {
+        const recommendations = {
+            documentation: [],
+            quality: [],
+            security: [],
+            performance: [],
+            complexity: []
+        };
+
+        // Check documentation metrics
+        const documentation = metrics?.quality?.documentation || {
+            hasReadme: false,
+            hasApiDocs: false,
+            readmeQuality: 0,
+            coverage: 0,
+            issues: []
+        };
+        
+        if (!documentation.hasReadme) {
+            recommendations.documentation.push({
+                type: 'missing-docs',
+                severity: 'medium',
+                message: 'Missing README.md file. Add project documentation for better maintainability.'
+            });
+        }
+
+        if (documentation.coverage < 50) {
+            recommendations.documentation.push({
+                type: 'low-coverage',
+                severity: 'medium',
+                message: `Low documentation coverage (${documentation.coverage}%). Consider adding more JSDoc comments and documentation.`
+            });
+        }
+
+        // Check project structure
+        const structure = metrics.structure || {};
+        if (structure.hasTests === false) {
+            recommendations.quality.push({
+                type: 'missing-tests',
+                severity: 'high',
+                message: 'No test directory found. Consider adding tests to improve code quality.'
+            });
+        }
+
+        // Check code complexity
+        const complexity = metrics.complexity?.cyclomaticComplexity || {};
+        if (complexity.average && complexity.average > 15) {
+            recommendations.complexity.push({
+                type: 'complexity',
+                severity: 'medium',
+                message: `High average complexity (${complexity.average}). Consider breaking down complex functions.`
+            });
+        }
+
+        // Check performance metrics
+        const performance = metrics.performance?.bundleSize || {};
+        if (performance.raw && performance.raw > 1000000) {
+            recommendations.performance.push({
+                type: 'bundle-size',
+                severity: 'medium',
+                message: `Large bundle size (${performance.formatted || '1MB+'}). Consider code splitting or removing unused dependencies.`
+            });
+        }
+
+        // Check security measures
+        const security = metrics.security || {};
+        if (security.hasPackageLock === false) {
+            recommendations.security.push({
+                type: 'missing-lock',
+                severity: 'high',
+                message: 'Missing package-lock.json. Add it to ensure consistent dependency versions.'
+            });
+        }
+
+        // Check code quality
+        const quality = metrics.quality || {};
+        if (quality.testCoverage && quality.testCoverage < 60) {
+            recommendations.quality.push({
+                type: 'test-coverage',
+                severity: 'medium',
+                message: `Low test coverage (${quality.testCoverage}%). Consider adding more tests.`
+            });
+        }
+
+        // Only return recommendations if we have any
+        const hasRecommendations = Object.values(recommendations).some(arr => arr.length > 0);
+        return hasRecommendations ? recommendations : {};
+    }
+
     async analyzeStructure(projectPath) {
         logger.info('Analyzing project structure...');
         try {
-            const [
-                hasPackageJson,
-                hasReadme,
-                hasTests,
-                hasConfig,
-                hasGitIgnore
-            ] = await Promise.all([
-                fs.access(path.join(projectPath, 'package.json')).then(() => true).catch(() => false),
-                fs.access(path.join(projectPath, 'README.md')).then(() => true).catch(() => false),
-                fs.access(path.join(projectPath, '__tests__')).then(() => true).catch(() => false),
-                fs.access(path.join(projectPath, 'config')).then(() => true).catch(() => false),
-                fs.access(path.join(projectPath, '.gitignore')).then(() => true).catch(() => false)
-            ]);
+            const [hasPackageJson, hasReadme, hasTests, hasConfig, hasGitIgnore] = 
+                await Promise.all([
+                    fs.access(path.join(projectPath, 'package.json')).then(() => true).catch(() => false),
+                    fs.access(path.join(projectPath, 'README.md')).then(() => true).catch(() => false),
+                    fs.access(path.join(projectPath, '__tests__')).then(() => true).catch(() => false),
+                    fs.access(path.join(projectPath, 'config')).then(() => true).catch(() => false),
+                    fs.access(path.join(projectPath, '.gitignore')).then(() => true).catch(() => false)
+                ]);
+
+            // Get source files
+            const sourceFiles = await this.findSourceFiles(projectPath);
 
             return {
                 hasPackageJson,
                 hasReadme,
                 hasTests,
                 hasConfig,
-                hasGitIgnore
+                hasGitIgnore,
+                sourceFiles: sourceFiles || [] // Ensure we always return an array
             };
         } catch (error) {
             logger.error(`Structure analysis failed: ${error.message}`);
@@ -228,34 +322,6 @@ class ProjectAnalyzer {
         } catch (error) {
             logger.error(`Complexity analysis failed: ${error.message}`);
             throw error;
-        }
-    }
-
-    generateRecommendations(metrics, recommendations) {
-        const { quality, complexity, performance } = metrics;
-
-        if (quality?.maintainabilityIndex < 70) {
-            recommendations.quality.push({
-                type: 'maintainability',
-                severity: 'high',
-                message: `Low maintainability score (${quality.maintainabilityIndex}/100). Consider improving code organization and documentation.`
-            });
-        }
-
-        if (complexity?.cyclomaticComplexity?.average > 15) {
-            recommendations.complexity.push({
-                type: 'complexity',
-                severity: 'medium',
-                message: `High average complexity (${complexity.cyclomaticComplexity.average}). Consider breaking down complex functions.`
-            });
-        }
-
-        if (performance?.bundleSize?.raw > 1000000) {
-            recommendations.performance.push({
-                type: 'bundle-size',
-                severity: 'medium',
-                message: `Large bundle size (${performance.bundleSize.formatted}). Consider code splitting or removing unused dependencies.`
-            });
         }
     }
 

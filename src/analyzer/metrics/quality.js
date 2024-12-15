@@ -18,6 +18,7 @@ class QualityAnalyzer {
                     hasJest: false,
                     hasMocha: false
                 },
+                documentation: await this.analyzeDocumentation(projectPath, fs),
                 maintainabilityIndex: 70, // Default value
                 issues: [],
                 fileAnalyses: [],
@@ -694,6 +695,104 @@ class QualityAnalyzer {
             throw error;
         }
     }
+    async analyzeDocumentation(projectPath, fs) {
+        if (!fs) {
+            throw new Error('FileSystem (fs) parameter is required for analyzeDocumentation');
+        }
+
+        try {
+            const docMetrics = {
+                hasReadme: false,
+                hasApiDocs: false,
+                readmeQuality: 0,
+                coverage: 0,
+                issues: []
+            };
+
+            // Check for README
+            const readmePaths = ['README.md', 'Readme.md', 'readme.md'];
+            for (const readmePath of readmePaths) {
+                try {
+                    const readmeContent = await fs.readFile(path.join(projectPath, readmePath), 'utf-8');
+                    docMetrics.hasReadme = true;
+                    docMetrics.readmeQuality = this.analyzeReadmeQuality(readmeContent);
+                    break;
+                } catch (error) {
+                    continue;
+                }
+            }
+
+            // Check for API documentation
+            const apiDocPaths = [
+                'docs/api',
+                'api-docs',
+                'api-spec',
+                'swagger.json',
+                'openapi.json'
+            ];
+
+            for (const docPath of apiDocPaths) {
+                try {
+                    await fs.access(path.join(projectPath, docPath));
+                    docMetrics.hasApiDocs = true;
+                    break;
+                } catch (error) {
+                    continue;
+                }
+            }
+
+            // Calculate documentation coverage
+            const sourceFiles = await this.findSourceFiles(projectPath, fs);
+            let documentedFiles = 0;
+
+            for (const file of sourceFiles) {
+                const content = await fs.readFile(file, 'utf-8');
+                const hasJsDoc = content.includes('/**') || content.includes('///');
+                if (hasJsDoc) documentedFiles++;
+            }
+
+            docMetrics.coverage = sourceFiles.length > 0 
+                ? Math.round((documentedFiles / sourceFiles.length) * 100)
+                : 0;
+
+            return docMetrics;
+        } catch (error) {
+            logger.warn(`Documentation analysis failed: ${error.message}`);
+            return {
+                hasReadme: false,
+                hasApiDocs: false,
+                readmeQuality: 0,
+                coverage: 0,
+                issues: [{
+                    type: 'error',
+                    message: `Documentation analysis failed: ${error.message}`
+                }]
+            };
+        }
+    }
+
+    analyzeReadmeQuality(content) {
+        if (!content) return 0;
+
+        const sections = {
+            installation: content.toLowerCase().includes('# installation') || 
+                         content.toLowerCase().includes('## installation'),
+            usage: content.toLowerCase().includes('# usage') || 
+                   content.toLowerCase().includes('## usage'),
+            api: content.toLowerCase().includes('# api') || 
+                 content.toLowerCase().includes('## api'),
+            examples: content.toLowerCase().includes('# example') || 
+                     content.toLowerCase().includes('## example'),
+            contributing: content.toLowerCase().includes('# contributing') || 
+                         content.toLowerCase().includes('## contributing')
+        };
+
+        const presentSections = Object.values(sections).filter(Boolean).length;
+        const maxSections = Object.keys(sections).length;
+        
+        return Math.round((presentSections / maxSections) * 100);
+    }
+
 }
 
 module.exports = QualityAnalyzer;
