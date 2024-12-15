@@ -101,7 +101,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "NODE_ENV=test chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-local-project -t express-api"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-local-project -t express-api"
 
 [[workflows.workflow]]
 name = "CLI Test Remote"
@@ -227,7 +227,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "jest"
+args = "npm test"
 
 [[workflows.workflow]]
 name = "CLI Help Test"

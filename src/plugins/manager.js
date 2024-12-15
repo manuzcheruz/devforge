@@ -186,29 +186,13 @@ class PluginManager {
                 if (file.endsWith('.js')) {
                     const fullPath = path.join(pluginPath, file);
                     try {
-                        const PluginClass = require(fullPath);
+                        const plugin = require(fullPath);
                         
-                        // Check if it's a class extending BasePlugin
-                        if (typeof PluginClass === 'function') {
-                            try {
-                                // Check if it's a class extending BasePlugin
-                                if (PluginClass.prototype instanceof require('../interfaces/base').BasePlugin) {
-                                    const plugin = new PluginClass();
-                                    
-                                    // Validate plugin structure
-                                    if (this.validatePlugin(plugin)) {
-                                        const category = this.detectPluginCategory(plugin);
-                                        if (category) {
-                                            await this.register(category, plugin);
-                                        } else {
-                                            console.warn(`Could not detect category for plugin: ${plugin.name}`);
-                                        }
-                                    }
-                                } else {
-                                    console.warn(`Plugin from ${file} does not extend BasePlugin`);
-                                }
-                            } catch (err) {
-                                console.error(`Error instantiating plugin from ${file}:`, err);
+                        // Validate plugin structure
+                        if (this.validatePlugin(plugin)) {
+                            const category = this.detectPluginCategory(plugin);
+                            if (category) {
+                                await this.register(category, plugin); // Use await here
                             }
                         }
                     } catch (error) {

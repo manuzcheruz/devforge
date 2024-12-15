@@ -227,59 +227,6 @@ Create a `nodeforge.json` in your template repository:
 }
 ```
 
-## Plugin Development
-
-NodeForge supports custom plugins to extend its functionality. Here's how to create your own plugin:
-
-### Plugin Structure
-```javascript
-const { BasePlugin } = require('@nodeforge/sdk');
-
-class MyCustomPlugin extends BasePlugin {
-    constructor() {
-        super({
-            name: 'my-plugin',
-            version: '1.0.0',
-            description: 'My custom plugin',
-            category: 'performance', // or 'api', 'security', etc.
-            capabilities: {
-                myFeature: true
-            }
-        });
-    }
-
-    async initialize(context) {
-        // Setup plugin
-    }
-
-    async execute(context) {
-        // Plugin logic
-        return results;
-    }
-}
-```
-
-### Plugin Categories
-- environment: Environment management plugins
-- api: API development tools
-- microservices: Microservices-related plugins
-- performance: Performance analysis tools
-- security: Security scanning and analysis
-- database: Database management tools
-
-### Plugin Lifecycle
-1. initialization: Plugin setup
-2. execution: Main plugin logic
-3. cleanup: Resource cleanup
-
-### Example Usage
-```javascript
-const plugin = new MyCustomPlugin();
-await plugin.initialize(context);
-const results = await plugin.execute(context);
-await plugin.cleanup();
-```
-
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
