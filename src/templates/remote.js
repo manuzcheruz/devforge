@@ -24,39 +24,115 @@ class RemoteTemplateManager {
     }
 
     async fetchTemplate(repositoryUrl) {
+        const startTime = Date.now();
         try {
-            logger.info(`Fetching template from ${repositoryUrl}`);
+            logger.info(`Starting template fetch process from ${repositoryUrl}`);
             const repoName = this.getRepoName(repositoryUrl);
             const targetDir = path.join(this.tempDir, repoName);
 
-            // Ensure temp directory exists
-            await fs.mkdir(this.tempDir, { recursive: true });
-
-            // Clone repository
-            const startTime = logger.startOperation('Cloning template repository');
-            await this.cloneRepository(repositoryUrl, targetDir);
-            logger.endOperation(startTime, 'Template repository cloned');
-
-            // Detect branch and default branch if needed
-            try {
-                await this.detectAndCheckoutDefaultBranch(targetDir);
-            } catch (branchError) {
-                logger.warn(`Branch detection failed: ${branchError.message}`);
+            // Enhanced initialization and validation
+            logger.info('Validating repository URL and preparing environment...');
+            if (!this.isValidGitUrl(repositoryUrl)) {
+                throw new Error('Invalid Git repository URL format');
             }
 
-            // Validate template structure
-            logger.info('Validating template structure...');
+            // Ensure clean temp directory exists
+            await fs.rm(targetDir, { recursive: true, force: true });
+            await fs.mkdir(this.tempDir, { recursive: true });
+            
+            // Enhanced clone process with progress tracking
+            const cloneStartTime = Date.now();
+            logger.info('Initiating repository clone...');
+            await this.cloneRepository(repositoryUrl, targetDir);
+            const cloneTime = ((Date.now() - cloneStartTime) / 1000).toFixed(1);
+            logger.info(`Repository cloned successfully in ${cloneTime}s`);
+
+            // Enhanced branch detection and checkout
+            try {
+                logger.info('Detecting and checking out default branch...');
+                await this.detectAndCheckoutDefaultBranch(targetDir);
+            } catch (branchError) {
+                // Non-critical error, continue with current branch
+                logger.warn(`Branch detection failed: ${branchError.message}. Continuing with current branch.`);
+            }
+
+            // Enhanced template validation with detailed feedback
+            logger.info('Beginning comprehensive template validation...');
+            const validationStartTime = Date.now();
+            
+            // Validate core template structure
             const template = await this.validateTemplate(targetDir);
             
-            // Additional validation for required files
+            // Enhanced validation with detailed file and structure checks
             const requiredFiles = ['package.json'];
+            const recommendedFiles = ['README.md', '.gitignore', 'src/index.js'];
+            const optionalFiles = ['.npmignore', 'LICENSE', 'CONTRIBUTING.md'];
+            const criticalErrors = [];
+            const warnings = [];
+            const suggestions = [];
+
+            // Comprehensive file validation with content checks
             for (const file of requiredFiles) {
                 const filePath = path.join(targetDir, file);
                 try {
                     await fs.access(filePath);
-                } catch {
-                    throw new Error(`Required file '${file}' not found in template`);
+                    const content = await fs.readFile(filePath, 'utf-8');
+                    
+                    // Additional validation for package.json
+                    if (file === 'package.json') {
+                        try {
+                            const pkg = JSON.parse(content);
+                            if (!pkg.name) warnings.push('package.json missing name field');
+                            if (!pkg.version) warnings.push('package.json missing version field');
+                            if (!pkg.scripts) warnings.push('package.json missing scripts section');
+                            logger.info('package.json validated successfully');
+                        } catch (e) {
+                            criticalErrors.push(`Invalid JSON in ${file}: ${e.message}`);
+                        }
+                    }
+                    logger.info(`Validated required file: ${file}`);
+                } catch (error) {
+                    criticalErrors.push(`Required file '${file}' validation failed: ${error.message}`);
                 }
+            }
+
+            // Check recommended files with specific validations
+            for (const file of recommendedFiles) {
+                const filePath = path.join(targetDir, file);
+                try {
+                    await fs.access(filePath);
+                    if (file === 'README.md') {
+                        const content = await fs.readFile(filePath, 'utf-8');
+                        if (content.length < 100) {
+                            suggestions.push('README.md seems too brief. Consider adding more documentation.');
+                        }
+                    }
+                    logger.info(`Found recommended file: ${file}`);
+                } catch {
+                    warnings.push(`Recommended file '${file}' not found in template`);
+                }
+            }
+
+            // Check optional files
+            for (const file of optionalFiles) {
+                const filePath = path.join(targetDir, file);
+                try {
+                    await fs.access(filePath);
+                    logger.info(`Found optional file: ${file}`);
+                } catch {
+                    suggestions.push(`Consider adding ${file} to improve template completeness`);
+                }
+            }
+
+            // Handle validation results
+            if (criticalErrors.length > 0) {
+                const errorMessage = criticalErrors.join('\n');
+                logger.error(`Template validation failed:\n${errorMessage}`);
+                throw new Error(errorMessage);
+            }
+
+            if (warnings.length > 0) {
+                warnings.forEach(warning => logger.warn(warning));
             }
 
             logger.success('Template validation successful');
@@ -73,42 +149,71 @@ class RemoteTemplateManager {
         return gitUrlPattern.test(url);
     }
 
-    getAuthenticatedUrl(repositoryUrl) {
+    async getAuthenticatedUrl(repositoryUrl) {
         const isGitHubUrl = /github\.com/.test(repositoryUrl);
         const gitToken = process.env.GITHUB_TOKEN;
         
         // For GitHub URLs
         if (isGitHubUrl) {
-            // Try to validate if it's a public repository first
+            logger.info('Processing GitHub repository URL...');
             try {
                 const repoPath = repositoryUrl.split('github.com/')[1].replace('.git', '');
                 const apiUrl = `https://api.github.com/repos/${repoPath}`;
-                const { execSync } = require('child_process');
                 
-                // Check repository visibility using GitHub API
-                const result = execSync(`curl -s ${apiUrl}`);
-                const repoInfo = JSON.parse(result);
+                // Use native https module for better control
+                const https = require('https');
+                const headers = gitToken ? { 'Authorization': `token ${gitToken}` } : {};
+                
+                const repoInfo = await new Promise((resolve, reject) => {
+                    const req = https.get(apiUrl, { headers }, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => {
+                            try {
+                                resolve(JSON.parse(data));
+                            } catch (e) {
+                                reject(new Error(`Invalid API response: ${e.message}`));
+                            }
+                        });
+                    });
+                    
+                    req.on('error', reject);
+                    req.end();
+                });
+                
+                if (repoInfo.message === 'Not Found') {
+                    throw new Error('Repository not found. Please check the URL.');
+                }
                 
                 if (!repoInfo.private) {
+                    logger.info('Public repository detected');
                     return {
                         cloneUrl: `https://github.com/${repoPath}.git`,
-                        authType: 'public'
+                        authType: 'public',
+                        defaultBranch: repoInfo.default_branch,
+                        description: repoInfo.description
                     };
                 }
+                
+                logger.info('Private repository detected');
             } catch (error) {
-                logger.warn('Failed to check repository visibility, assuming private');
+                logger.warn(`Repository check failed: ${error.message}`);
             }
             
-            // If we reach here, either the repo is private or we couldn't determine its visibility
+            // Handle private repositories or API failures
             if (gitToken) {
+                logger.info('Using authenticated access');
                 const urlParts = repositoryUrl.split('://');
                 return {
                     cloneUrl: `https://${gitToken}@${urlParts[1]}`,
                     authType: 'token'
                 };
+            } else {
+                logger.warn('No GitHub token found for private repository');
             }
         }
         
+        logger.info('Using anonymous access');
         return {
             cloneUrl: repositoryUrl,
             authType: 'anonymous'
@@ -134,33 +239,74 @@ class RemoteTemplateManager {
             }
             
             // Setup authentication and determine repository visibility
-            const { cloneUrl, authType } = await this.getAuthenticatedUrl(repositoryUrl);
+            const { cloneUrl, authType, defaultBranch, description } = await this.getAuthenticatedUrl(repositoryUrl);
             logger.info(`Using ${authType} authentication`);
+            if (description) {
+                logger.info(`Repository description: ${description}`);
+            }
             
             // Create parent directory
             await fs.mkdir(path.dirname(targetDir), { recursive: true });
             
-            if (authType === 'public') {
-                // For public repositories, try direct HTTPS clone
-                try {
-                    const output = execSync(`git clone ${cloneUrl} "${targetDir}"`, {
-                        stdio: ['pipe', 'pipe', 'pipe'],
-                        encoding: 'utf8',
-                        timeout: 60000 // 60s timeout for public repos
+            // Progress tracking with more detailed information
+            const startTime = Date.now();
+            const reportProgress = (phase, details = '') => {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                const memory = process.memoryUsage();
+                const memoryMB = (memory.heapUsed / 1024 / 1024).toFixed(1);
+                logger.info(`[${phase}] ${details}`);
+                logger.info(`Time: ${elapsed}s, Memory: ${memoryMB}MB`);
+            };
+            
+            // Network check before clone
+            try {
+                const dns = require('dns');
+                await new Promise((resolve, reject) => {
+                    dns.resolve('github.com', (err) => {
+                        if (err) reject(new Error('Network connectivity issues'));
+                        resolve();
                     });
-                    logger.info(`Clone output: ${output}`);
-                    logger.success('Repository cloned successfully');
+                });
+            } catch (error) {
+                throw new Error(`Network check failed: ${error.message}`);
+            }
+            
+            if (authType === 'public') {
+                try {
+                    reportProgress('Clone', 'Starting public repository clone');
+                    
+                    // Try shallow clone first for faster download
+                    const cloneOptions = [
+                        '--depth', '1',
+                        '--single-branch'
+                    ];
+                    
+                    if (defaultBranch) {
+                        cloneOptions.push('--branch', defaultBranch);
+                    }
+                    
+                    const output = execSync(
+                        `git clone ${cloneOptions.join(' ')} ${cloneUrl} "${targetDir}"`,
+                        {
+                            stdio: ['pipe', 'pipe', 'pipe'],
+                            encoding: 'utf8',
+                            timeout: 30000 // 30s timeout for shallow clone
+                        }
+                    );
+                    
+                    reportProgress('Clone', 'Shallow clone successful');
+                    logger.success('Repository cloned successfully (shallow)');
                     return;
                 } catch (error) {
-                    logger.warn(`Public clone failed: ${error.message}`);
-                    if (error.stderr) logger.warn(`Error details: ${error.stderr}`);
-                    // Don't throw here, try shallow clone as fallback
+                    const errorMessage = error.stderr ? error.stderr.toString() : error.message;
+                    reportProgress('Retry', 'Shallow clone failed, attempting full clone');
+                    logger.warn(`Shallow clone failed: ${errorMessage}`);
                 }
             }
             
             // Try shallow clone as fallback or for private repos
-            logger.info('Attempting shallow clone...');
             try {
+                logger.info('Attempting shallow clone...');
                 const output = execSync(`git clone --depth 1 ${cloneUrl} "${targetDir}"`, {
                     stdio: ['pipe', 'pipe', 'pipe'],
                     encoding: 'utf8',
@@ -175,44 +321,54 @@ class RemoteTemplateManager {
                 await fs.rm(targetDir, { recursive: true, force: true });
             }
 
-            // Full clone with retry mechanism
-            const maxRetries = 3;
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const timeout = attempt * 45000; // 45s timeout, increases with each attempt
-                    logger.info(`Full clone attempt ${attempt}/${maxRetries} (timeout: ${timeout/1000}s)...`);
-                    
-                    const output = execSync(`git clone ${cloneUrl} "${targetDir}"`, {
-                        stdio: ['pipe', 'pipe', 'pipe'],
-                        encoding: 'utf8',
-                        timeout
-                    });
-                    logger.info(`Clone output: ${output}`);
-                    
-                    // Verify the clone was successful by checking if the directory contains files
-                    const files = await fs.readdir(targetDir);
-                    if (files.length === 0) {
-                        throw new Error('Repository appears to be empty');
+            try {
+                // Full clone with retry mechanism
+                const maxRetries = 3;
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                        const timeout = attempt * 45000; // 45s timeout, increases with each attempt
+                        logger.info(`Full clone attempt ${attempt}/${maxRetries} (timeout: ${timeout/1000}s)...`);
+                        
+                        const output = execSync(`git clone ${cloneUrl} "${targetDir}"`, {
+                            stdio: ['pipe', 'pipe', 'pipe'],
+                            encoding: 'utf8',
+                            timeout
+                        });
+                        logger.info(`Clone output: ${output}`);
+                        
+                        // Verify the clone was successful by checking if the directory contains files
+                        const files = await fs.readdir(targetDir);
+                        if (files.length === 0) {
+                            throw new Error('Repository appears to be empty');
+                        }
+                        
+                        logger.success('Repository cloned successfully (full)');
+                        return;
+                    } catch (error) {
+                        const errorMsg = error.message.toLowerCase();
+                        if (error.stderr) logger.warn(`Error details: ${error.stderr}`);
+                        
+                        if (errorMsg.includes('authentication') || errorMsg.includes('403')) {
+                            throw new Error('Authentication failed. Please check your credentials.');
+                        }
+                        
+                        if (attempt === maxRetries) {
+                            throw error;
+                        }
+                        
+                        logger.warn(`Attempt ${attempt} failed: ${error.message}`);
+                        await fs.rm(targetDir, { recursive: true, force: true });
+                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
                     }
-                    
-                    logger.success('Repository cloned successfully (full)');
-                    return;
-                } catch (error) {
-                    const errorMsg = error.message.toLowerCase();
-                    if (error.stderr) logger.warn(`Error details: ${error.stderr}`);
-                    
-                    if (errorMsg.includes('authentication') || errorMsg.includes('403')) {
-                        throw new Error('Authentication failed. Please check your credentials.');
-                    }
-                    
-                    if (attempt === maxRetries) {
-                        throw error;
-                    }
-                    
-                    logger.warn(`Attempt ${attempt} failed: ${error.message}`);
-                    await fs.rm(targetDir, { recursive: true, force: true });
-                    await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
                 }
+            } catch (error) {
+                if (error.message.includes('Authentication failed')) {
+                    throw new Error('Authentication failed. For private repositories, please set GITHUB_TOKEN environment variable');
+                }
+                if (error.message.includes('timeout')) {
+                    throw new Error('Repository clone timed out. The repository might be too large or the connection is slow');
+                }
+                throw new Error(`Failed to clone repository: ${error.message}`);
             }
         } catch (error) {
             if (error.message.includes('Authentication failed')) {
@@ -235,14 +391,33 @@ class RemoteTemplateManager {
                 throw new Error('Template directory not found');
             }
 
+            // Track validation progress and project characteristics
+            const validation = {
+                hasPackageJson: false,
+                hasSourceFiles: false,
+                hasTests: false,
+                hasDocumentation: false,
+                hasBuildConfig: false,
+                totalFiles: 0,
+                errors: [],
+                warnings: []
+            };
+
             // Initialize with default configuration
             let templateConfig = {
                 name: path.basename(templateDir),
                 version: '1.0.0',
                 files: {},
                 dependencies: {},
-                devDependencies: {}
+                devDependencies: {},
+                variants: [{
+                    name: 'default',
+                    description: 'Default template configuration',
+                    features: []
+                }]
             };
+            
+            logger.info('Analyzing template structure...');
             
             // Try to load nodeforge.json configuration
             const configPath = path.join(templateDir, 'nodeforge.json');
@@ -287,6 +462,27 @@ class RemoteTemplateManager {
             for (const [path, content] of Object.entries(detectedConfig.files)) {
                 if (!templateConfig.files[path]) {
                     templateConfig.files[path] = content;
+                    logger.info(`Added detected file: ${path}`);
+                }
+            }
+            
+            // Ensure package.json has required fields
+            if (templateConfig.files['package.json']) {
+                try {
+                    const packageJson = JSON.parse(templateConfig.files['package.json']);
+                    if (!packageJson.dependencies) packageJson.dependencies = {};
+                    if (!packageJson.devDependencies) packageJson.devDependencies = {};
+                    if (!packageJson.scripts) {
+                        packageJson.scripts = {
+                            "start": "node src/index.js",
+                            "test": "jest",
+                            "dev": "nodemon src/index.js"
+                        };
+                    }
+                    templateConfig.files['package.json'] = JSON.stringify(packageJson, null, 2);
+                    logger.info('Updated package.json with required fields');
+                } catch (error) {
+                    logger.warn(`Error processing package.json: ${error.message}`);
                 }
             }
 
@@ -345,8 +541,20 @@ class RemoteTemplateManager {
         try {
             logger.info('Detecting project structure...');
             const fsExtra = require('fs-extra');
-            const { promisify } = require('util');
             const { glob } = require('glob');
+            const path = require('path');
+
+            // Initialize metrics for structure detection
+            let fileCount = 0;
+            let directoryCount = 0;
+            const fileTypes = new Set();
+            const detectedFeatures = new Set();
+
+            // Track project characteristics
+            let hasTypeScript = false;
+            let hasTests = false;
+            let hasDocumentation = false;
+            let hasBuildConfig = false;
 
             const config = {
                 files: {},
@@ -504,11 +712,22 @@ class RemoteTemplateManager {
             'build',
             '.github',
             '.idea',
-            '.vscode',
-            'test',
-            'tests',
-            '__tests__'
+            '.vscode'
         ];
+        
+        // Track project characteristics for better template handling
+        const projectFeatures = {
+            hasTypeScript: false,
+            hasTests: false,
+            hasDocumentation: false,
+            hasBuildConfig: false,
+            hasDocker: false,
+            frameworks: new Set(),
+            buildTools: new Set()
+        };
+        
+        // Include test files if they exist
+        const includeTests = template.variables?.includeTests === 'true';
         
         try {
             const readDirRecursive = async (dir, baseDir = '') => {
