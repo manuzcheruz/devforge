@@ -21,14 +21,37 @@ async function createProject(options, pluginManager) {
 
         let template;
         // Handle remote template if URL is provided
-        if (options.templateUrl) {
-            logger.info(`Fetching remote template from: ${options.templateUrl}`);
-            template = await remoteTemplateManager.fetchTemplate(options.templateUrl);
-            
-            // Load template files after fetching
-            template = await remoteTemplateManager.loadTemplateFiles(template);
+        if (options.url) {
+            logger.info(`Fetching remote template from: ${options.url}`);
+            try {
+                template = await remoteTemplateManager.fetchTemplate(options.url);
+                await remoteTemplateManager.detectAndCheckoutDefaultBranch(template.path);
+                // Load template files after fetching
+                template = await remoteTemplateManager.loadTemplateFiles(template);
+                logger.success('Remote template fetched successfully');
+
+                // Set default template configuration for remote templates
+                template.dependencies = template.dependencies || {};
+                template.devDependencies = template.devDependencies || {};
+                
+                // Try to read package.json from remote template
+                try {
+                    const pkgJsonPath = path.join(template.path, 'package.json');
+                    const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, 'utf-8'));
+                    template.dependencies = { ...pkgJson.dependencies };
+                    template.devDependencies = { ...pkgJson.devDependencies };
+                } catch (pkgError) {
+                    logger.warn('No package.json found in remote template, using empty dependency lists');
+                }
+            } catch (error) {
+                logger.error(`Failed to fetch remote template: ${error.message}`);
+                throw error;
+            }
         } else {
             // Get local template content
+            if (!options.template) {
+                throw new Error('No template specified and no remote URL provided');
+            }
             template = getBaseTemplate(options.template);
         }
 

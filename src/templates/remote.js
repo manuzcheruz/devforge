@@ -37,11 +37,33 @@ class RemoteTemplateManager {
             await this.cloneRepository(repositoryUrl, targetDir);
             logger.endOperation(startTime, 'Template repository cloned');
 
+            // Detect branch and default branch if needed
+            try {
+                await this.detectAndCheckoutDefaultBranch(targetDir);
+            } catch (branchError) {
+                logger.warn(`Branch detection failed: ${branchError.message}`);
+            }
+
             // Validate template structure
+            logger.info('Validating template structure...');
             const template = await this.validateTemplate(targetDir);
+            
+            // Additional validation for required files
+            const requiredFiles = ['package.json'];
+            for (const file of requiredFiles) {
+                const filePath = path.join(targetDir, file);
+                try {
+                    await fs.access(filePath);
+                } catch {
+                    throw new Error(`Required file '${file}' not found in template`);
+                }
+            }
+
+            logger.success('Template validation successful');
             return template;
         } catch (error) {
             logger.error(`Failed to fetch template: ${error.message}`);
+            await this.cleanup().catch(() => {});
             throw error;
         }
     }
@@ -55,12 +77,36 @@ class RemoteTemplateManager {
         const isGitHubUrl = /github\.com/.test(repositoryUrl);
         const gitToken = process.env.GITHUB_TOKEN;
         
-        if (isGitHubUrl && gitToken) {
-            const urlParts = repositoryUrl.split('://');
-            return {
-                cloneUrl: `https://${gitToken}@${urlParts[1]}`,
-                authType: 'token'
-            };
+        // For GitHub URLs
+        if (isGitHubUrl) {
+            // Try to validate if it's a public repository first
+            try {
+                const repoPath = repositoryUrl.split('github.com/')[1].replace('.git', '');
+                const apiUrl = `https://api.github.com/repos/${repoPath}`;
+                const { execSync } = require('child_process');
+                
+                // Check repository visibility using GitHub API
+                const result = execSync(`curl -s ${apiUrl}`);
+                const repoInfo = JSON.parse(result);
+                
+                if (!repoInfo.private) {
+                    return {
+                        cloneUrl: `https://github.com/${repoPath}.git`,
+                        authType: 'public'
+                    };
+                }
+            } catch (error) {
+                logger.warn('Failed to check repository visibility, assuming private');
+            }
+            
+            // If we reach here, either the repo is private or we couldn't determine its visibility
+            if (gitToken) {
+                const urlParts = repositoryUrl.split('://');
+                return {
+                    cloneUrl: `https://${gitToken}@${urlParts[1]}`,
+                    authType: 'token'
+                };
+            }
         }
         
         return {
@@ -87,14 +133,32 @@ class RemoteTemplateManager {
                 throw new Error('Invalid Git repository URL');
             }
             
-            // Setup authentication if needed
-            const { cloneUrl, authType } = this.getAuthenticatedUrl(repositoryUrl);
+            // Setup authentication and determine repository visibility
+            const { cloneUrl, authType } = await this.getAuthenticatedUrl(repositoryUrl);
             logger.info(`Using ${authType} authentication`);
             
             // Create parent directory
             await fs.mkdir(path.dirname(targetDir), { recursive: true });
             
-            // Try shallow clone first (faster)
+            if (authType === 'public') {
+                // For public repositories, try direct HTTPS clone
+                try {
+                    const output = execSync(`git clone ${cloneUrl} "${targetDir}"`, {
+                        stdio: ['pipe', 'pipe', 'pipe'],
+                        encoding: 'utf8',
+                        timeout: 60000 // 60s timeout for public repos
+                    });
+                    logger.info(`Clone output: ${output}`);
+                    logger.success('Repository cloned successfully');
+                    return;
+                } catch (error) {
+                    logger.warn(`Public clone failed: ${error.message}`);
+                    if (error.stderr) logger.warn(`Error details: ${error.stderr}`);
+                    // Don't throw here, try shallow clone as fallback
+                }
+            }
+            
+            // Try shallow clone as fallback or for private repos
             logger.info('Attempting shallow clone...');
             try {
                 const output = execSync(`git clone --depth 1 ${cloneUrl} "${targetDir}"`, {
@@ -163,94 +227,224 @@ class RemoteTemplateManager {
 
     async validateTemplate(templateDir) {
         try {
-            // Try to load nodeforge.json if it exists
-            const configPath = path.join(templateDir, 'nodeforge.json');
-            let templateConfig;
+            logger.info('Starting template validation...');
+            const fsExtra = require('fs-extra');
             
-            try {
-                const configContent = await fs.readFile(configPath, 'utf-8');
-                templateConfig = JSON.parse(configContent);
-                logger.info('Found nodeforge.json configuration');
-            } catch (error) {
-                // If nodeforge.json doesn't exist, try to auto-detect project structure
-                logger.info('No nodeforge.json found, auto-detecting project structure...');
-                templateConfig = await this.detectProjectStructure(templateDir);
+            // Ensure template directory exists
+            if (!await fsExtra.pathExists(templateDir)) {
+                throw new Error('Template directory not found');
             }
 
-            // Ensure minimum required configuration
-            templateConfig = {
+            // Initialize with default configuration
+            let templateConfig = {
                 name: path.basename(templateDir),
                 version: '1.0.0',
-                ...templateConfig,
-                files: templateConfig.files || {},
-                dependencies: templateConfig.dependencies || {},
-                devDependencies: templateConfig.devDependencies || {}
+                files: {},
+                dependencies: {},
+                devDependencies: {}
             };
-
-            // Validate the template structure
-            const validation = await this.validateProjectStructure(templateDir, templateConfig);
-            if (!validation.valid) {
-                throw new Error(`Invalid template structure: ${validation.errors.join(', ')}`);
+            
+            // Try to load nodeforge.json configuration
+            const configPath = path.join(templateDir, 'nodeforge.json');
+            if (await fsExtra.pathExists(configPath)) {
+                try {
+                    const configContent = await fsExtra.readFile(configPath, 'utf-8');
+                    const parsedConfig = JSON.parse(configContent);
+                    logger.info('Found and parsed nodeforge.json configuration');
+                    templateConfig = {
+                        ...templateConfig,
+                        ...parsedConfig
+                    };
+                } catch (error) {
+                    logger.warn(`Error reading nodeforge.json: ${error.message}`);
+                }
             }
 
-            logger.success('Template validation successful');
+            // Detect project structure
+            logger.info('Detecting project structure...');
+            let detectedConfig;
+            try {
+                detectedConfig = await this.detectProjectStructure(templateDir);
+            } catch (error) {
+                logger.warn(`Project structure detection failed: ${error.message}`);
+                // Provide fallback configuration if detection fails
+                detectedConfig = {
+                    files: {},
+                    dependencies: {},
+                    devDependencies: {}
+                };
+            }
+            
+            // Merge configurations
+            templateConfig = {
+                ...templateConfig,
+                dependencies: { ...templateConfig.dependencies, ...(detectedConfig.dependencies || {}) },
+                devDependencies: { ...templateConfig.devDependencies, ...(detectedConfig.devDependencies || {}) },
+                files: { ...templateConfig.files, ...(detectedConfig.files || {}) }
+            };
+
+            // Add detected files, but don't overwrite existing ones
+            for (const [path, content] of Object.entries(detectedConfig.files)) {
+                if (!templateConfig.files[path]) {
+                    templateConfig.files[path] = content;
+                }
+            }
+
+            // Validate core files exist
+            const requiredFiles = ['package.json'];
+            const missingFiles = [];
+            for (const file of requiredFiles) {
+                if (!templateConfig.files[file] && !await fsExtra.pathExists(path.join(templateDir, file))) {
+                    missingFiles.push(file);
+                }
+            }
+
+            if (missingFiles.length > 0) {
+                logger.warn(`Missing required files: ${missingFiles.join(', ')}`);
+                // Add default package.json if missing
+                if (missingFiles.includes('package.json')) {
+                    templateConfig.files['package.json'] = JSON.stringify({
+                        name: templateConfig.name,
+                        version: templateConfig.version,
+                        main: 'src/index.js',
+                        scripts: {
+                            start: 'node src/index.js'
+                        }
+                    }, null, 2);
+                }
+            }
+
+            // Ensure minimum project structure
+            if (Object.keys(templateConfig.files).length === 0) {
+                logger.warn('No files detected, adding minimal project structure');
+                templateConfig.files['src/index.js'] = '// Generated template file\nconsole.log("Hello from the template");\n';
+                if (!templateConfig.files['package.json']) {
+                    templateConfig.files['package.json'] = JSON.stringify({
+                        name: templateConfig.name,
+                        version: templateConfig.version,
+                        main: 'src/index.js',
+                        scripts: {
+                            start: 'node src/index.js'
+                        }
+                    }, null, 2);
+                }
+            }
+
+            logger.success(`Template validated successfully with ${Object.keys(templateConfig.files).length} files`);
             return {
                 ...templateConfig,
                 path: templateDir
             };
         } catch (error) {
-            throw new Error(`Template validation failed: ${error.message}`);
+            logger.error(`Template validation error: ${error.message}`);
+            throw error;
         }
     }
 
     async detectProjectStructure(templateDir) {
-        const config = {
-            files: {},
-            dependencies: {},
-            devDependencies: {}
-        };
-
         try {
-            // Check for package.json
-            const packageJsonPath = path.join(templateDir, 'package.json');
-            try {
-                const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-                config.dependencies = packageJson.dependencies || {};
-                config.devDependencies = packageJson.devDependencies || {};
-                logger.info('Detected Node.js project structure');
-            } catch {
-                logger.warn('No package.json found');
+            logger.info('Detecting project structure...');
+            const fsExtra = require('fs-extra');
+            const { promisify } = require('util');
+            const { glob } = require('glob');
+
+            const config = {
+                files: {},
+                dependencies: {},
+                devDependencies: {}
+            };
+
+            // Ensure template directory exists
+            if (!await fsExtra.pathExists(templateDir)) {
+                throw new Error(`Template directory not found: ${templateDir}`);
             }
 
-            // Scan for common project files
-            const commonFiles = [
-                'src/**/*.{js,ts,jsx,tsx}',
-                'public/**/*',
-                'templates/**/*',
-                '*.json',
-                '*.js',
-                '*.ts',
-                '.env.example',
-                '.gitignore'
-            ];
-
-            // Use glob to find files
-            const { glob } = require('glob');
-            for (const pattern of commonFiles) {
-                const files = await glob(pattern, { cwd: templateDir, dot: true });
-                for (const file of files) {
-                    const fullPath = path.join(templateDir, file);
-                    const stats = await fs.stat(fullPath);
-                    if (stats.isFile()) {
-                        config.files[file] = true;
-                    }
+            // Read package.json first if it exists
+            const packageJsonPath = path.join(templateDir, 'package.json');
+            if (await fsExtra.pathExists(packageJsonPath)) {
+                try {
+                    const packageJsonContent = await fsExtra.readFile(packageJsonPath, 'utf-8');
+                    const packageJson = JSON.parse(packageJsonContent);
+                    config.dependencies = packageJson.dependencies || {};
+                    config.devDependencies = packageJson.devDependencies || {};
+                    config.files['package.json'] = packageJsonContent;
+                    logger.info('Found package.json and loaded dependencies');
+                } catch (err) {
+                    logger.warn(`Error parsing package.json: ${err.message}`);
                 }
             }
 
+            // Define file patterns to include
+            const patterns = [
+                'src/**/*.{js,ts,jsx,tsx}',
+                'public/**/*',
+                'templates/**/*',
+                '*.{json,js,ts,md}',
+                '.env.example',
+                '.gitignore',
+                'README.md'
+            ];
+
+            // Process all patterns
+            let foundFiles = [];
+            for (const pattern of patterns) {
+                try {
+                    const matches = await glob(pattern, {
+                        cwd: templateDir,
+                        dot: true,
+                        nodir: true,
+                        ignore: ['node_modules/**', '.git/**', 'dist/**', 'build/**']
+                    });
+                    if (Array.isArray(matches)) {
+                        foundFiles = [...foundFiles, ...matches];
+                    } else {
+                        logger.warn(`No matches found for pattern: ${pattern}`);
+                    }
+                } catch (error) {
+                    logger.warn(`Error processing pattern ${pattern}: ${error.message}`);
+                    continue;
+                }
+            }
+
+            // Remove duplicates
+            foundFiles = [...new Set(foundFiles)];
+
+            // Read all found files
+            for (const file of foundFiles) {
+                try {
+                    const fullPath = path.join(templateDir, file);
+                    if (await fsExtra.pathExists(fullPath)) {
+                        const content = await fsExtra.readFile(fullPath, 'utf-8');
+                        const normalizedPath = file.split(path.sep).join('/');
+                        config.files[normalizedPath] = content;
+                        logger.info(`Loaded file: ${normalizedPath}`);
+                    }
+                } catch (error) {
+                    logger.warn(`Error reading file ${file}: ${error.message}`);
+                }
+            }
+
+            // Add default files if none found
+            if (Object.keys(config.files).length === 0) {
+                logger.warn('No files detected, adding default structure');
+                config.files['src/index.js'] = '// Generated template file\nconsole.log("Hello from the template");\n';
+                if (!config.files['package.json']) {
+                    config.files['package.json'] = JSON.stringify({
+                        name: path.basename(templateDir),
+                        version: '1.0.0',
+                        main: 'src/index.js',
+                        scripts: {
+                            start: 'node src/index.js'
+                        }
+                    }, null, 2);
+                }
+            }
+
+            logger.info(`Detected ${Object.keys(config.files).length} files in template`);
             return config;
         } catch (error) {
             logger.error(`Project structure detection failed: ${error.message}`);
-            throw error;
+            throw new Error(`Failed to detect project structure: ${error.message}`);
         }
     }
 
@@ -279,19 +473,78 @@ class RemoteTemplateManager {
         };
     }
 
+    async detectAndCheckoutDefaultBranch(targetDir) {
+        const { execSync } = require('child_process');
+        try {
+            // Get the default branch name
+            const defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD | sed "s@^refs/remotes/origin/@@"', {
+                cwd: targetDir,
+                encoding: 'utf8'
+            }).trim();
+
+            // Checkout the default branch
+            execSync(`git checkout ${defaultBranch}`, {
+                cwd: targetDir,
+                encoding: 'utf8'
+            });
+
+            logger.info(`Checked out default branch: ${defaultBranch}`);
+        } catch (error) {
+            logger.warn(`Failed to detect/checkout default branch: ${error.message}`);
+            // Continue with current branch
+        }
+    }
     async loadTemplateFiles(template) {
         const files = {};
+        const ignoredPatterns = [
+            'node_modules',
+            '.git',
+            'coverage',
+            'dist',
+            'build',
+            '.github',
+            '.idea',
+            '.vscode',
+            'test',
+            'tests',
+            '__tests__'
+        ];
         
-        for (const [filePath] of Object.entries(template.files)) {
-            const fullPath = path.join(template.path, filePath);
-            const content = await fs.readFile(fullPath, 'utf-8');
-            files[filePath] = content;
+        try {
+            const readDirRecursive = async (dir, baseDir = '') => {
+                const entries = await fs.readdir(dir, { withFileTypes: true });
+                
+                for (const entry of entries) {
+                    const fullPath = path.join(dir, entry.name);
+                    const relativePath = path.join(baseDir, entry.name);
+                    
+                    // Skip ignored directories and files
+                    if (ignoredPatterns.some(pattern => entry.name.includes(pattern))) {
+                        continue;
+                    }
+                    
+                    if (entry.isDirectory()) {
+                        await readDirRecursive(fullPath, relativePath);
+                    } else {
+                        // Only include relevant file types
+                        const ext = path.extname(entry.name).toLowerCase();
+                        if (['.js', '.ts', '.json', '.md', '.yml', '.yaml', '.env', '.html', '.css'].includes(ext)) {
+                            const content = await fs.readFile(fullPath, 'utf-8');
+                            files[relativePath] = content;
+                        }
+                    }
+                }
+            };
+            
+            await readDirRecursive(template.path);
+            
+            return {
+                ...template,
+                files
+            };
+        } catch (error) {
+            throw new Error(`Failed to load template files: ${error.message}`);
         }
-
-        return {
-            ...template,
-            files
-        };
     }
 
     async cleanup() {

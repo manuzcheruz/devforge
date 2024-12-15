@@ -279,7 +279,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/express-starter.git"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/generator.git"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

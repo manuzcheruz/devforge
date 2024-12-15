@@ -171,6 +171,36 @@ class CLI {
             }
         };
 
+        // Handle remote template URLs
+        if (options.url) {
+            // Validate Git URL format
+            const gitUrlRegex = /^(https?:\/\/|git@)([^\/:]+)[\/:]([^\/:]+)\/(.+?)(\.git)?$/;
+            if (!gitUrlRegex.test(options.url)) {
+                logger.error('Invalid Git repository URL format');
+                process.exit(1);
+            }
+
+            if (options.name) {
+                return { name: options.name, url: options.url };
+            }
+
+            const answers = await inquirer.prompt([{
+                type: 'input',
+                name: 'name',
+                message: 'Project name:',
+                validate: (input) => {
+                    try {
+                        require('../utils/validator').validateProjectName(input);
+                        return true;
+                    } catch (error) {
+                        return error.message;
+                    }
+                }
+            }]);
+            return { ...answers, url: options.url };
+        }
+
+        // For local templates
         if (options.name && options.template && options.variant && options.vars) {
             return options;
         }
