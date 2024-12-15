@@ -44,84 +44,16 @@ class ProjectAnalyzer {
         logger.info('Starting project analysis...');
         
         try {
-            // Validate project path
             if (!projectPath || typeof projectPath !== 'string') {
                 throw new Error('Valid project path is required');
             }
 
             const normalizedPath = path.resolve(projectPath);
-            try {
-                const stats = await fs.stat(normalizedPath);
-                if (!stats.isDirectory()) {
-                    throw new Error('Project path must be a directory');
-                }
-            } catch (error) {
-                logger.error(`Project path is not accessible: ${error.message}`);
-                throw new Error(`Project path is not accessible: ${error.message}`);
+            const stats = await fs.stat(normalizedPath);
+            if (!stats.isDirectory()) {
+                throw new Error('Project path must be a directory');
             }
 
-            // Initialize metrics with default values
-            this.metrics = {
-                structure: {
-                    hasPackageJson: false,
-                    hasReadme: false,
-                    hasTests: false,
-                    hasConfig: false,
-                    hasGitIgnore: false,
-                    sourceFiles: []
-                },
-                dependencies: {
-                    direct: 0,
-                    dev: 0,
-                    peer: 0,
-                    typescript: {
-                        hasTypeScript: false,
-                        hasTypesPackages: false
-                    },
-                    production: {},
-                    development: {}
-                },
-                quality: {
-                    issues: [],
-                    linting: {
-                        hasEslint: false,
-                        hasPrettier: false
-                    },
-                    maintainabilityIndex: 70,
-                    typescript: false,
-                    testing: {
-                        hasJest: false,
-                        hasMocha: false
-                    }
-                },
-                security: {
-                    hasPackageLock: false,
-                    securityFiles: {
-                        hasEnvExample: false
-                    },
-                    issues: []
-                },
-                complexity: {
-                    cyclomaticComplexity: {
-                        average: 0,
-                        highest: 0,
-                        files: []
-                    }
-                },
-                performance: {
-                    bundleSize: {
-                        raw: 0,
-                        formatted: '0 B'
-                    },
-                    asyncPatterns: {
-                        promises: 0,
-                        asyncAwait: 0,
-                        callbacks: 0
-                    }
-                }
-            };
-
-            // Find source files first as they're needed by multiple analyzers
             logger.info('Finding source files...');
             const sourceFiles = await this.findSourceFiles(normalizedPath);
             if (!Array.isArray(sourceFiles)) {
@@ -129,141 +61,49 @@ class ProjectAnalyzer {
             }
             logger.info(`Found ${sourceFiles.length} source files to analyze`);
 
-            // Execute analysis components in parallel
             logger.info('Starting parallel analysis of project components...');
             const analysisPromises = [
-                {
-                    name: 'structure',
-                    promise: (async () => {
-                        logger.info('Analyzing project structure...');
-                        const structure = await this.analyzeStructure(normalizedPath);
-                        return { ...structure, sourceFiles };
-                    })()
-                },
-                {
-                    name: 'dependencies',
-                    promise: (async () => {
-                        logger.info('Analyzing dependencies...');
-                        return await this.analyzeDependencies(normalizedPath);
-                    })()
-                },
-                {
-                    name: 'security',
-                    promise: (async () => {
-                        logger.info('Analyzing security...');
-                        return await this.analyzeSecurity(normalizedPath);
-                    })()
-                },
-                {
-                    name: 'quality',
-                    promise: (async () => {
-                        logger.info('Analyzing code quality...');
-                        const [qualityMetrics, testCoverage] = await Promise.all([
-                            this.qualityAnalyzer.analyzeCodeQuality(normalizedPath, fs),
-                            this.qualityAnalyzer.analyzeTestCoverage(normalizedPath, fs)
-                        ]);
-                        return {
-                            ...qualityMetrics,
-                            testCoverage
-                        };
-                    })()
-                },
-                {
-                    name: 'performance',
-                    promise: (async () => {
-                        logger.info('Analyzing performance metrics...');
-                        const bundleSize = await this.performanceAnalyzer.analyzeBundleSize(sourceFiles, fs);
-                        const asyncPatterns = await this.performanceAnalyzer.analyzeAsyncPatterns(sourceFiles, fs);
-                        return { bundleSize, asyncPatterns };
-                    })()
-                },
-                {
-                    name: 'complexity',
-                    promise: (async () => {
-                        logger.info('Analyzing code complexity...');
-                        return await this.complexityAnalyzer.analyzeComplexity(sourceFiles, fs);
-                    })()
-                }
+                this.analyzeStructure(normalizedPath),
+                this.analyzeDependencies(normalizedPath),
+                this.analyzeSecurity(normalizedPath),
+                this.analyzeCodeQuality(normalizedPath),
+                this.analyzePerformance(sourceFiles),
+                this.analyzeComplexity(sourceFiles)
             ];
 
-            const analysisResults = await Promise.allSettled(analysisPromises.map(({ promise }) => promise));
-            const warnings = [];
-            const recommendations = [];
+            const [structure, dependencies, security, quality, performance, complexity] = 
+                await Promise.all(analysisPromises);
 
-            // Process results and handle failures
-            analysisResults.forEach((result, index) => {
-                const { name } = analysisPromises[index];
-                if (result.status === 'fulfilled') {
-                    if (result.value && typeof result.value === 'object') {
-                        this.metrics[name] = {
-                            ...this.metrics[name],
-                            ...result.value
-                        };
-                        
-                        // Generate recommendations based on metrics
-                        if (name === 'quality' && result.value) {
-                            const qualityMetrics = result.value;
-                            
-                            // Check for code duplication issues
-                            const duplicationScore = qualityMetrics.duplicationScore ?? 100;
-                            if (duplicationScore < 80) {
-                                const duplicateDetails = [];
-                                if (Array.isArray(qualityMetrics.fileAnalyses)) {
-                                    duplicateDetails.push(...qualityMetrics.fileAnalyses
-                                        .filter(analysis => analysis && typeof analysis.duplicationScore === 'number' && analysis.duplicationScore < 80)
-                                        .map(analysis => ({
-                                            file: analysis.file || 'unknown',
-                                            duplicateScore: analysis.duplicationScore,
-                                            metrics: analysis.metrics?.duplication || {}
-                                        })));
-                                }
-                                
-                                recommendations.push({
-                                    type: 'code-duplication',
-                                    severity: 'medium',
-                                    message: `High code duplication detected (${100 - duplicationScore}% of code). Consider refactoring duplicate code into reusable functions or modules.`,
-                                    details: duplicateDetails
-                                });
-                            }
-                            
-                            // Check maintainability issues
-                            const maintainabilityIndex = qualityMetrics.maintainabilityIndex ?? 100;
-                            if (maintainabilityIndex < 70) {
-                                const maintainabilityDetails = [];
-                                if (Array.isArray(qualityMetrics.fileAnalyses)) {
-                                    maintainabilityDetails.push(...qualityMetrics.fileAnalyses
-                                        .filter(analysis => analysis && typeof analysis.maintainabilityScore === 'number' && analysis.maintainabilityScore < 70)
-                                        .map(analysis => ({
-                                            file: analysis.file || 'unknown',
-                                            score: analysis.maintainabilityScore,
-                                            metrics: analysis.metrics || {}
-                                        })));
-                                }
-                                
-                                recommendations.push({
-                                    type: 'maintainability',
-                                    severity: 'high',
-                                    message: `Low maintainability score (${maintainabilityIndex}/100). Consider improving code organization and documentation.`,
-                                    details: maintainabilityDetails
-                                });
-                            }
-                        }
-                    }
-                } else {
-                    const errorMessage = `${name} analysis failed: ${result.reason.message}`;
-                    logger.error(errorMessage);
-                    warnings.push(errorMessage);
-                }
-            });
+            const recommendations = {
+                documentation: [],
+                quality: [],
+                security: [],
+                performance: [],
+                complexity: []
+            };
 
-            // Return comprehensive analysis results
+            // Generate recommendations based on metrics
+            this.generateRecommendations(
+                { structure, dependencies, security, quality, performance, complexity },
+                recommendations
+            );
+
             return {
                 status: 'success',
-                metrics: this.metrics,
+                metrics: {
+                    structure,
+                    dependencies,
+                    security,
+                    quality,
+                    performance,
+                    complexity
+                },
+                recommendations: Object.values(recommendations).some(arr => arr.length > 0) 
+                    ? recommendations 
+                    : undefined,
                 timestamp: new Date().toISOString(),
                 projectPath: normalizedPath,
-                sourceFiles: sourceFiles.length,
-                warnings: warnings.length > 0 ? warnings : undefined
+                sourceFiles: sourceFiles.length
             };
         } catch (error) {
             logger.error(`Project analysis failed: ${error.message}`);
@@ -272,6 +112,7 @@ class ProjectAnalyzer {
     }
 
     async analyzeStructure(projectPath) {
+        logger.info('Analyzing project structure...');
         try {
             const [
                 hasPackageJson,
@@ -287,20 +128,13 @@ class ProjectAnalyzer {
                 fs.access(path.join(projectPath, '.gitignore')).then(() => true).catch(() => false)
             ]);
 
-            // Find source files
-            const sourceFiles = await this.findSourceFiles(projectPath);
-
-            // Update metrics structure with all fields
-            this.metrics.structure = {
+            return {
                 hasPackageJson,
                 hasReadme,
                 hasTests,
                 hasConfig,
-                hasGitIgnore,
-                sourceFiles: sourceFiles || [] // Ensure it's always an array
+                hasGitIgnore
             };
-
-            return this.metrics.structure;
         } catch (error) {
             logger.error(`Structure analysis failed: ${error.message}`);
             throw error;
@@ -308,11 +142,12 @@ class ProjectAnalyzer {
     }
 
     async analyzeDependencies(projectPath) {
+        logger.info('Analyzing dependencies...');
         try {
             const packageJsonPath = path.join(projectPath, 'package.json');
             const packageData = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
 
-            this.metrics.dependencies = {
+            return {
                 direct: Object.keys(packageData.dependencies || {}).length,
                 dev: Object.keys(packageData.devDependencies || {}).length,
                 peer: Object.keys(packageData.peerDependencies || {}).length,
@@ -332,230 +167,99 @@ class ProjectAnalyzer {
         }
     }
 
-    async analyzeCodeQuality(projectPath) {
+    async analyzeSecurity(projectPath) {
+        logger.info('Analyzing security...');
         try {
-            // Analyze linting configuration
-            const hasEslint = await fs.access(path.join(projectPath, '.eslintrc'))
-                .then(() => true)
-                .catch(() => false);
-            const hasPrettier = await fs.access(path.join(projectPath, '.prettierrc'))
-                .then(() => true)
-                .catch(() => false);
-
-            // Analyze testing setup
-            const [hasJest, hasMocha] = await Promise.all([
-                this.hasPackage(projectPath, 'jest'),
-                this.hasPackage(projectPath, 'mocha')
+            const [hasPackageLock, hasEnvExample] = await Promise.all([
+                fs.access(path.join(projectPath, 'package-lock.json')).then(() => true).catch(() => false),
+                fs.access(path.join(projectPath, '.env.example')).then(() => true).catch(() => false)
             ]);
 
-            // Get test coverage metrics
-            const testCoverage = await this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs);
-
-            // Calculate maintainability metrics
-            const maintainabilityIndex = await this.qualityAnalyzer.calculateMaintenanceScore(
-                await this.getProjectContent(projectPath)
-            );
-
-            // Initialize metrics object with complete structure and default values
-            const metrics = {
-                linting: { 
-                    hasEslint: hasEslint || false, 
-                    hasPrettier: hasPrettier || false 
+            return {
+                hasPackageLock,
+                securityFiles: {
+                    hasEnvExample
                 },
-                testing: { 
-                    hasJest: hasJest || false, 
-                    hasMocha: hasMocha || false 
-                },
-                maintainabilityIndex: maintainabilityIndex || 70,
-                issues: [],
-                fileAnalyses: [],
-                duplicationScore: 100, // Default to perfect score
-                testCoverage: {
-                    lines: 0,
-                    functions: 0,
-                    branches: 0,
-                    statements: 0
-                }
+                issues: []
             };
+        } catch (error) {
+            logger.error(`Security analysis failed: ${error.message}`);
+            throw error;
+        }
+    }
 
-            // Analyze and collect code quality issues
-            const sourceFiles = await this.findSourceFiles(projectPath);
-            for (const file of sourceFiles) {
-                const content = await fs.readFile(file, 'utf-8');
-                const fileIssues = this.qualityAnalyzer.detectCodeIssues(content);
-                if (fileIssues.length > 0) {
-                    metrics.issues.push({
-                        file: path.relative(projectPath, file),
-                        issues: fileIssues
-                    });
-                }
-            }
-            this.metrics.quality = {...this.metrics.quality, ...metrics};
+    async analyzeCodeQuality(projectPath) {
+        logger.info('Analyzing code quality...');
+        try {
+            const [qualityMetrics, testCoverage] = await Promise.all([
+                this.qualityAnalyzer.analyzeCodeQuality(projectPath, fs),
+                this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs)
+            ]);
 
+            return {
+                ...qualityMetrics,
+                testCoverage
+            };
         } catch (error) {
             logger.error(`Code quality analysis failed: ${error.message}`);
             throw error;
         }
     }
 
-    async getProjectContent(projectPath) {
-        const sourceFiles = await this.findSourceFiles(projectPath);
-        const contents = await Promise.all(
-            sourceFiles.map(file => fs.readFile(file, 'utf-8'))
-        );
-        return contents.join('\n');
-    }
-
-    async calculateMaintainabilityIndex(projectPath) {
+    async analyzePerformance(sourceFiles) {
+        logger.info('Analyzing performance metrics...');
         try {
-            const sourceFiles = await this.findSourceFiles(projectPath);
-            let totalScore = 0;
+            const [bundleSize, asyncPatterns] = await Promise.all([
+                this.performanceAnalyzer.analyzeBundleSize(sourceFiles, fs),
+                this.performanceAnalyzer.analyzeAsyncPatterns(sourceFiles, fs)
+            ]);
 
-            for (const file of sourceFiles) {
-                const content = await fs.readFile(file, 'utf-8');
-                const complexity = this.calculateComplexity(content);
-                totalScore += 100 - complexity;
-            }
-
-            return sourceFiles.length > 0 ? Math.max(0, Math.min(100, totalScore / sourceFiles.length)) : 70;
-        } catch (error) {
-            return 70; // Default score
-        }
-    }
-
-    async analyzeSecurity(projectPath) {
-        const hasPackageLock = await fs.access(path.join(projectPath, 'package-lock.json'))
-            .then(() => true)
-            .catch(() => false);
-        const hasEnvExample = await fs.access(path.join(projectPath, '.env.example'))
-            .then(() => true)
-            .catch(() => false);
-
-        this.metrics.security = {
-            hasPackageLock,
-            securityFiles: {
-                hasEnvExample
-            }
-        };
-    }
-
-    async analyzePerformance(projectPath) {
-        try {
-            const bundleSize = await this.calculateBundleSize(projectPath);
-            const asyncPatterns = await this.analyzeAsyncPatterns(projectPath);
-
-            this.metrics.performance = {
-                bundleSize,
-                asyncPatterns
-            };
+            return { bundleSize, asyncPatterns };
         } catch (error) {
             logger.error(`Performance analysis failed: ${error.message}`);
             throw error;
         }
     }
 
-    async analyzeComplexity(projectPath) {
+    async analyzeComplexity(sourceFiles) {
+        logger.info('Analyzing code complexity...');
         try {
-            const sourceFiles = await this.findSourceFiles(projectPath);
-            let totalComplexity = 0;
-            let highestComplexity = 0;
-            const complexityData = [];
-
-            for (const file of sourceFiles) {
-                const content = await fs.readFile(file, 'utf-8');
-                const complexity = this.calculateComplexity(content);
-                const relativePath = path.relative(projectPath, file);
-                
-                complexityData.push({ path: relativePath, complexity });
-                totalComplexity += complexity;
-                highestComplexity = Math.max(highestComplexity, complexity);
-            }
-
-            const averageComplexity = sourceFiles.length > 0 ? totalComplexity / sourceFiles.length : 0;
-
-            this.metrics.complexity = {
-                cyclomaticComplexity: {
-                    average: averageComplexity,
-                    highest: highestComplexity,
-                    files: complexityData
-                }
-            };
+            return await this.complexityAnalyzer.analyzeComplexity(sourceFiles, fs);
         } catch (error) {
             logger.error(`Complexity analysis failed: ${error.message}`);
             throw error;
         }
     }
 
-    calculateComplexity(content) {
-        const complexityFactors = {
-            controlFlow: {
-                patterns: [
-                    /if\s*\(/g,
-                    /else\s+if\s*\(/g,
-                    /for\s*\(/g,
-                    /while\s*\(/g,
-                    /do\s*{/g,
-                    /switch\s*\(/g,
-                    /case\s+[^:]+:/g,
-                    /catch\s*\(/g
-                ],
-                weight: 1
-            },
-            logicalOperators: {
-                patterns: [/&&|\|\|/g],
-                weight: 0.5
-            },
-            ternary: {
-                patterns: [/\?[^:]+:/g],
-                weight: 0.5
-            },
-            functions: {
-                patterns: [
-                    /function\s+\w+\s*\([^)]*\)\s*{/g,
-                    /\w+\s*:\s*function\s*\([^)]*\)\s*{/g,
-                    /=>\s*{/g
-                ],
-                weight: 0.5
-            }
-        };
+    generateRecommendations(metrics, recommendations) {
+        const { quality, complexity, performance } = metrics;
 
-        let totalComplexity = 1; // Base complexity
-        
-        for (const factor of Object.values(complexityFactors)) {
-            const matchCount = factor.patterns.reduce((count, pattern) => {
-                const matches = content.match(pattern) || [];
-                return count + matches.length;
-            }, 0);
-            totalComplexity += matchCount * factor.weight;
+        if (quality?.maintainabilityIndex < 70) {
+            recommendations.quality.push({
+                type: 'maintainability',
+                severity: 'high',
+                message: `Low maintainability score (${quality.maintainabilityIndex}/100). Consider improving code organization and documentation.`
+            });
         }
 
-        return Math.round(totalComplexity * 10) / 10; // Round to 1 decimal place
-    }
+        if (complexity?.cyclomaticComplexity?.average > 15) {
+            recommendations.complexity.push({
+                type: 'complexity',
+                severity: 'medium',
+                message: `High average complexity (${complexity.cyclomaticComplexity.average}). Consider breaking down complex functions.`
+            });
+        }
 
-    async analyzeBestPractices(projectPath) {
-        this.metrics.practices = {
-            documentation: {
-                hasReadme: this.metrics.structure.hasReadme
-            },
-            cicd: {
-                hasGithubActions: await fs.access(path.join(projectPath, '.github/workflows'))
-                    .then(() => true)
-                    .catch(() => false)
-            },
-            docker: {
-                hasDockerfile: await fs.access(path.join(projectPath, 'Dockerfile'))
-                    .then(() => true)
-                    .catch(() => false)
-            }
-        };
+        if (performance?.bundleSize?.raw > 1000000) {
+            recommendations.performance.push({
+                type: 'bundle-size',
+                severity: 'medium',
+                message: `Large bundle size (${performance.bundleSize.formatted}). Consider code splitting or removing unused dependencies.`
+            });
+        }
     }
 
     async findSourceFiles(projectPath) {
-        if (!projectPath || typeof projectPath !== 'string') {
-            logger.error('Invalid project path provided to findSourceFiles');
-            return [];
-        }
-
         const sourceFiles = new Set();
         const ignoredDirs = new Set([
             'node_modules', 'coverage', 'dist', 'build',
@@ -564,107 +268,36 @@ class ProjectAnalyzer {
         const sourceFileExtensions = new Set(['.js', '.jsx', '.ts', '.tsx']);
         const testFilePatterns = ['.test.', '.spec.', '.d.ts', '.min.js'];
         
-        try {
-            const walk = async (dir) => {
-                try {
-                    const entries = await fs.readdir(dir, { withFileTypes: true });
-                    
-                    for (const entry of entries) {
-                        // Skip ignored directories and files
-                        if (entry.name.startsWith('.') || ignoredDirs.has(entry.name)) {
-                            continue;
-                        }
+        const walk = async (dir) => {
+            try {
+                const entries = await fs.readdir(dir, { withFileTypes: true });
+                
+                for (const entry of entries) {
+                    if (entry.name.startsWith('.') || ignoredDirs.has(entry.name)) {
+                        continue;
+                    }
 
-                        const fullPath = path.join(dir, entry.name);
-                        
-                        if (entry.isDirectory()) {
-                            await walk(fullPath).catch(error => {
-                                logger.warn(`Skipping directory ${fullPath}: ${error.message}`);
-                            });
-                        } else if (entry.isFile()) {
-                            const ext = path.extname(entry.name).toLowerCase();
-                            if (sourceFileExtensions.has(ext) && 
-                                !testFilePatterns.some(pattern => entry.name.includes(pattern))) {
-                                sourceFiles.add(fullPath);
-                            }
+                    const fullPath = path.join(dir, entry.name);
+                    
+                    if (entry.isDirectory()) {
+                        await walk(fullPath).catch(error => {
+                            logger.warn(`Skipping directory ${fullPath}: ${error.message}`);
+                        });
+                    } else if (entry.isFile()) {
+                        const ext = path.extname(entry.name).toLowerCase();
+                        if (sourceFileExtensions.has(ext) && 
+                            !testFilePatterns.some(pattern => entry.name.includes(pattern))) {
+                            sourceFiles.add(fullPath);
                         }
                     }
-                } catch (error) {
-                    logger.warn(`Error reading directory ${dir}: ${error.message}`);
                 }
-            };
-
-            await walk(projectPath);
-            return Array.from(sourceFiles);
-        } catch (error) {
-            logger.error(`Failed to find source files: ${error.message}`);
-            return [];
-        }
-    }
-
-    formatBytes(bytes) {
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let size = bytes;
-        let unitIndex = 0;
-
-        while (size >= 1024 && unitIndex < units.length - 1) {
-            size /= 1024;
-            unitIndex++;
-        }
-
-        return `${size.toFixed(2)} ${units[unitIndex]}`;
-    }
-
-    async hasPackage(projectPath, packageName) {
-        try {
-            const packageJson = JSON.parse(await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8'));
-            return !!(packageJson.dependencies?.[packageName] || packageJson.devDependencies?.[packageName]);
-        } catch {
-            return false;
-        }
-    }
-
-    async calculateBundleSize(projectPath) {
-        try {
-            const sourceFiles = await this.findSourceFiles(projectPath);
-            let totalSize = 0;
-
-            for (const file of sourceFiles) {
-                const stats = await fs.stat(file);
-                totalSize += stats.size;
+            } catch (error) {
+                logger.warn(`Error reading directory ${dir}: ${error.message}`);
             }
+        };
 
-            return {
-                raw: totalSize,
-                formatted: this.formatBytes(totalSize)
-            };
-        } catch (error) {
-            logger.warn(`Bundle size calculation failed: ${error.message}`);
-            return { raw: 0, formatted: '0 B' };
-        }
-    }
-
-    async analyzeAsyncPatterns(projectPath) {
-        try {
-            const sourceFiles = await this.findSourceFiles(projectPath);
-            const patterns = {
-                promises: 0,
-                asyncAwait: 0,
-                callbacks: 0
-            };
-
-            for (const file of sourceFiles) {
-                const content = await fs.readFile(file, 'utf-8');
-                patterns.promises += (content.match(/new\s+Promise|Promise\.(all|race|resolve|reject)/g) || []).length;
-                patterns.asyncAwait += (content.match(/async|await/g) || []).length;
-                patterns.callbacks += (content.match(/callback|cb|done|next/g) || []).length;
-            }
-
-            return patterns;
-        } catch (error) {
-            logger.warn(`Async patterns analysis failed: ${error.message}`);
-            return { promises: 0, asyncAwait: 0, callbacks: 0 };
-        }
+        await walk(projectPath);
+        return Array.from(sourceFiles);
     }
 }
 
