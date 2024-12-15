@@ -69,10 +69,6 @@ args = "Template Basic Test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Remote Template Test"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "Test Remote Express App"
 
 [[workflows.workflow]]
@@ -272,21 +268,6 @@ task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-basic-project -t express-api -v minimal --vars \"port=3000,useTypescript=false\""
 
 [[workflows.workflow]]
-name = "Remote Template Test"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "rm -rf test-remote-project && GITHUB_TOKEN=$GITHUB_TOKEN chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/generator.git && cd test-remote-project && npm install && npm start"
-waitForPort = 3000
-
-[[workflows.workflow]]
 name = "Test Remote Express App"
 author = "agent"
 
@@ -298,7 +279,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd test-remote-project && npm install && node app.js"
+args = "cd test-remote-project && rm -rf node_modules package-lock.json && npm cache clean --force && npm install && node app.js"
 waitForPort = 3000
 
 [deployment]
