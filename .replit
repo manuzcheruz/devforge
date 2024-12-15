@@ -63,6 +63,10 @@ args = "Test Remote Template 2"
 task = "workflow.run"
 args = "Remote Template Test"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "CLI Help Test Updated"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -159,7 +163,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cat README.md"
+args = "cat README.md | grep -i 'node' || true"
 
 [[workflows.workflow]]
 name = "Test Suite"
@@ -244,6 +248,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-versioned --url https://github.com/expressjs/express.git --version 4.18.2"
+
+[[workflows.workflow]]
+name = "CLI Help Test Updated"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodesmith.js && ./bin/nodesmith.js --help"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

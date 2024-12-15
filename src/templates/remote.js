@@ -9,8 +9,8 @@ const crypto = require('crypto');
 
 class RemoteTemplateManager {
     constructor() {
-        this.tempDir = path.join(os.tmpdir(), '.nodeforge-templates');
-        this.cacheDir = path.join(os.homedir(), '.nodeforge', 'template-cache');
+        this.tempDir = path.join(os.tmpdir(), '.nodesmith-templates');
+        this.cacheDir = path.join(os.homedir(), '.nodesmith', 'template-cache');
         this.cacheMetadataFile = path.join(this.cacheDir, 'metadata.json');
         this.currentUrl = null;
         this.init();
@@ -548,7 +548,7 @@ class RemoteTemplateManager {
             
             // Validate template configuration
             try {
-                const configPath = path.join(templatePath, 'nodeforge.json');
+                const configPath = path.join(templatePath, 'nodesmith.json');
                 const configContent = await fs.readFile(configPath, 'utf-8');
                 const config = JSON.parse(configContent);
                 

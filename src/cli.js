@@ -13,7 +13,7 @@ class CLI {
     setupCommands() {
         this.program
             .version('1.0.0')
-            .description('NodeSmith - Node.js Development Workflow Automation Tool');
+            .description('NodeSmith - Node.js Project Development & Analysis Tool');
 
         this.program
             .command('init')

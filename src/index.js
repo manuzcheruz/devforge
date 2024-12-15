@@ -2,7 +2,7 @@ const { createProject } = require('./commands/init');
 const { loadConfig, saveConfig } = require('./commands/config');
 const { PluginManager } = require('./plugins/manager');
 
-class NodeForge {
+class NodeSmith {
     constructor() {
         this.pluginManager = new PluginManager();
         this.registerCorePlugins();
@@ -120,4 +120,4 @@ class NodeForge {
     }
 }
 
-module.exports = new NodeForge();
+module.exports = new NodeSmith();
