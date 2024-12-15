@@ -3,169 +3,196 @@ const fs = require('fs').promises;
 const path = require('path');
 const { logger } = require('../utils/logger');
 const os = require('os');
-const registry = require('./registry');
+const { URL } = require('url');
 
 class RemoteTemplateManager {
     constructor() {
-        this.tempDir = path.join(os.tmpdir(), '.nodeforge-remote-templates');
+        this.tempDir = path.join(os.tmpdir(), '.nodeforge-templates');
     }
 
-    async fetchTemplate(url, metadata = {}) {
-        logger.info(`Fetching remote template from: ${url}`);
-        
+    async detectAndCheckoutDefaultBranch(repoPath) {
         try {
-            // Initialize registry if not already initialized
-            await registry.initialize();
-            
-            // Add template to registry if not exists
-            const templateId = registry.generateTemplateId(url);
-            let template = registry.getTemplate(templateId);
-            
-            if (!template) {
-                template = await registry.addTemplate(url, metadata);
-                logger.info('Template added to registry');
-            } else if (!template.verified) {
-                // Verify template if it exists but not verified
-                const verified = await registry.verifyTemplate(template);
-                if (!verified) {
-                    throw new Error('Template verification failed');
-                }
-            }
-            
-            // Create temp directory for template
-            await fs.mkdir(this.tempDir, { recursive: true });
-            const targetDir = path.join(this.tempDir, `template-${Date.now()}`);
-            
-            // Clone verified template using authentication if available
-            logger.info('Cloning template repository...');
-            
-            // Format GitHub URL with token authentication
-            let gitUrl = url;
-            if (url.startsWith('https://github.com/')) {
-                const token = process.env.GITHUB_TOKEN;
-                if (!token) {
-                    throw new Error('GitHub token is required for accessing GitHub repositories. Please set GITHUB_TOKEN environment variable.');
-                }
-                // Format URL with token, ensuring proper encoding
-                const encodedToken = encodeURIComponent(token);
-                gitUrl = url.replace('https://github.com/', `https://${encodedToken}@github.com/`);
-                logger.debug('Using authenticated GitHub URL');
-            }
-            
-            try {
-                logger.debug('Attempting to clone repository...');
-                // Enhanced git clone with better error handling and auth configuration
-                execSync(`git clone --depth 1 "${gitUrl}" "${targetDir}"`, { 
-                    stdio: ['ignore', 'pipe', 'pipe'],
-                    env: { 
-                        ...process.env, 
-                        GIT_TERMINAL_PROMPT: '0',
-                        GIT_ASKPASS: 'echo',
-                        GIT_SSL_NO_VERIFY: '1',
-                        GIT_CONFIG_PARAMETERS: "'credential.helper='"
-                    }
-                });
-                logger.success('Repository cloned successfully');
-            } catch (error) {
-                logger.error(`Failed to clone repository: ${error.message}`);
-                if (error.message.toLowerCase().includes('authentication failed')) {
-                    throw new Error('GitHub authentication failed. Please verify your GITHUB_TOKEN is valid and has sufficient permissions.');
-                } else if (error.message.toLowerCase().includes('not found')) {
-                    throw new Error('Repository not found. Please verify the URL is correct and the repository exists.');
-                } else if (error.message.toLowerCase().includes('ssl')) {
-                    throw new Error('SSL verification failed. Please check your network connection and SSL certificates.');
-                }
-                throw new Error(`Failed to clone repository: ${error.message}`);
-            }
-            
-            // Load template files from the correct directory
-            const templatePath = template.metadata.templatePath || '';
-            const templateDir = path.join(targetDir, templatePath);
-            const templateFiles = await this.loadTemplateFiles(templateDir);
-            
-            return {
-                ...template,
-                files: templateFiles
-            };
+            // Get the default branch name
+            const defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
+                cwd: repoPath,
+                encoding: 'utf8'
+            }).trim().replace('refs/remotes/origin/', '');
+
+            // Checkout the default branch
+            execSync(`git checkout ${defaultBranch}`, {
+                cwd: repoPath,
+                stdio: 'pipe'
+            });
+
+            return defaultBranch;
         } catch (error) {
-            logger.error(`Failed to fetch template: ${error.message}`);
-            throw error;
+            logger.warn(`Failed to detect/checkout default branch: ${error.message}`);
+            return 'main'; // Fallback to main if detection fails
         }
     }
 
-    async validateTemplate(templateDir) {
+    async validateTemplateStructure(templatePath) {
+        const issues = [];
+        const templateInfo = {
+            hasPackageJson: false,
+            hasNodeforgeConfig: false,
+            templateFiles: [],
+            config: {}
+        };
+
         try {
             // Check for package.json
-            await fs.access(path.join(templateDir, 'package.json'));
-            return true;
-        } catch {
-            return false;
-        }
-    }
+            const packageJsonPath = path.join(templatePath, 'package.json');
+            try {
+                await fs.access(packageJsonPath);
+                templateInfo.hasPackageJson = true;
+            } catch {
+                logger.warn('No package.json found in template');
+            }
 
-    async loadTemplate(templateDir) {
-        try {
-            logger.info('Loading template configuration...');
-            
-            // Read package.json
-            const packageJsonPath = path.join(templateDir, 'package.json');
-            const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-            
-            // Basic template metadata
-            const template = {
-                name: packageJson.name,
-                version: packageJson.version,
-                description: packageJson.description,
-                dependencies: packageJson.dependencies || {},
-                devDependencies: packageJson.devDependencies || {},
-                files: await this.loadTemplateFiles(templateDir)
-            };
-            
-            return template;
-        } catch (error) {
-            logger.error(`Failed to load template: ${error.message}`);
-            throw error;
-        }
-    }
+            // Scan for potential template files
+            const files = await fs.readdir(templatePath, { recursive: true });
+            templateInfo.templateFiles = files.filter(file => 
+                !file.includes('node_modules') && 
+                !file.startsWith('.git') &&
+                !file.startsWith('.')
+            );
 
-    async loadTemplateFiles(templateDir) {
-        const files = {};
-        const ignoredPatterns = [
-            'node_modules',
-            '.git',
-            'coverage',
-            'dist',
-            'build'
-        ];
-        
-        try {
-            const readDirRecursive = async (dir, baseDir = '') => {
-                const entries = await fs.readdir(dir, { withFileTypes: true });
-                
-                for (const entry of entries) {
-                    const fullPath = path.join(dir, entry.name);
-                    const relativePath = path.join(baseDir, entry.name);
-                    
-                    // Skip ignored directories and files
-                    if (ignoredPatterns.some(pattern => entry.name.includes(pattern))) {
-                        continue;
+            if (templateInfo.templateFiles.length === 0) {
+                issues.push('No template files found in repository');
+            }
+
+            // Check for nodeforge.json configuration
+            const configPath = path.join(templatePath, 'nodeforge.json');
+            try {
+                const configContent = await fs.readFile(configPath, 'utf-8');
+                const config = JSON.parse(configContent);
+                templateInfo.hasNodeforgeConfig = true;
+                templateInfo.config = config;
+            } catch {
+                logger.info('No nodeforge.json found, will use default configuration');
+                templateInfo.config = {
+                    template: {
+                        name: path.basename(templatePath),
+                        version: '1.0.0',
+                        description: 'Remote template'
                     }
-                    
-                    if (entry.isDirectory()) {
-                        await readDirRecursive(fullPath, relativePath);
+                };
+            }
+
+            // Validate minimum requirements
+            if (!templateInfo.hasPackageJson && !templateInfo.templateFiles.some(f => f.endsWith('.js') || f.endsWith('.ts'))) {
+                issues.push('No JavaScript/TypeScript files found in template');
+            }
+
+            return {
+                isValid: issues.length === 0,
+                issues,
+                templateInfo
+            };
+        } catch (error) {
+            logger.error(`Template validation error: ${error.message}`);
+            return {
+                isValid: false,
+                issues: [`Failed to validate template: ${error.message}`],
+                templateInfo
+            };
+        }
+    }
+
+    async fetchTemplate(url, retries = 3) {
+        logger.info(`Fetching remote template from: ${url}`);
+        let targetDir = '';
+        let attempt = 0;
+
+        while (attempt < retries) {
+            try {
+                // Create temp directory for template
+                await fs.mkdir(this.tempDir, { recursive: true });
+                targetDir = path.join(this.tempDir, `template-${Date.now()}`);
+                
+                // Handle GitHub URLs with token
+                let gitUrl = url;
+                if (url.startsWith('https://github.com/')) {
+                    if (process.env.GITHUB_TOKEN) {
+                        const tokenUrl = new URL(url);
+                        tokenUrl.username = process.env.GITHUB_TOKEN;
+                        gitUrl = tokenUrl.toString();
+                        logger.debug('Using authenticated GitHub URL');
                     } else {
-                        const content = await fs.readFile(fullPath, 'utf-8');
-                        files[relativePath] = content;
+                        logger.warn('No GitHub token found, using public access');
                     }
                 }
-            };
-            
-            await readDirRecursive(templateDir);
-            logger.info(`Loaded ${Object.keys(files).length} template files`);
-            return files;
-        } catch (error) {
-            logger.error(`Failed to load template files: ${error.message}`);
-            throw error;
+
+                // Clone repository with timeout and specific options
+                logger.info(`Cloning repository (attempt ${attempt + 1}/${retries})...`);
+                execSync(
+                    `git clone --depth 1 --single-branch "${gitUrl}" "${targetDir}"`,
+                    { 
+                        stdio: 'pipe',
+                        timeout: 60000, // 60 second timeout
+                        env: {
+                            ...process.env,
+                            GIT_TERMINAL_PROMPT: '0' // Disable git prompts
+                        }
+                    }
+                );
+
+                // Verify the clone was successful
+                const gitDirExists = await fs.access(path.join(targetDir, '.git'))
+                    .then(() => true)
+                    .catch(() => false);
+                
+                if (!gitDirExists) {
+                    throw new Error('Git repository was not cloned correctly');
+                }
+
+                // Checkout default branch
+                const defaultBranch = await this.detectAndCheckoutDefaultBranch(targetDir);
+                logger.info(`Using default branch: ${defaultBranch}`);
+                
+                // Validate template structure
+                const validation = await this.validateTemplateStructure(targetDir);
+                if (!validation.isValid) {
+                    throw new Error(`Invalid template structure: ${validation.issues.join(', ')}`);
+                }
+
+                // Read package.json
+                const packageJsonPath = path.join(targetDir, 'package.json');
+                const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
+                const packageJson = JSON.parse(packageJsonContent);
+
+                logger.success('Template fetched and validated successfully');
+                
+                // Clean up .git directory to save space
+                await fs.rm(path.join(targetDir, '.git'), { recursive: true, force: true });
+                
+                return {
+                    url,
+                    path: targetDir,
+                    packageJson,
+                    defaultBranch
+                };
+            } catch (error) {
+                attempt++;
+                logger.warn(`Template fetch attempt ${attempt} failed: ${error.message}`);
+                
+                if (targetDir) {
+                    try {
+                        await fs.rm(targetDir, { recursive: true, force: true });
+                    } catch (cleanupError) {
+                        logger.warn(`Cleanup failed: ${cleanupError.message}`);
+                    }
+                }
+                
+                if (attempt === retries) {
+                    throw new Error(`Failed to fetch template after ${retries} attempts: ${error.message}`);
+                }
+                
+                // Exponential backoff with jitter
+                const delay = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 1000, 10000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
         }
     }
 
@@ -174,7 +201,7 @@ class RemoteTemplateManager {
             await fs.rm(this.tempDir, { recursive: true, force: true });
             logger.info('Cleaned up temporary files');
         } catch (error) {
-            logger.warn(`Failed to clean up: ${error.message}`);
+            logger.warn(`Cleanup failed: ${error.message}`);
         }
     }
 }
