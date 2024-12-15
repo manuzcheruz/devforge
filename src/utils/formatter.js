@@ -10,11 +10,12 @@ function formatTextReport(analysis) {
     // Project Structure
     report.push(chalk.bold('\nProject Structure'));
     report.push('──────────────────────────────────────────────────');
-    report.push(`📁 Package.json: ${formatCheck(analysis.metrics.structure.hasPackageJson)}`);
-    report.push(`📝 README: ${formatCheck(analysis.metrics.structure.hasReadme)}`);
-    report.push(`🧪 Tests: ${formatCheck(analysis.metrics.structure.hasTests)}`);
-    report.push(`⚙️  Config: ${formatCheck(analysis.metrics.structure.hasConfig)}`);
-    report.push(`📌 Git Ignore: ${formatCheck(analysis.metrics.structure.hasGitIgnore)}`);
+    const structure = analysis.metrics.structure || {};
+    report.push(`📁 Package.json: ${formatCheck(structure.hasPackageJson)}`);
+    report.push(`📝 README: ${formatCheck(structure.hasReadme)}`);
+    report.push(`🧪 Tests: ${formatCheck(structure.hasTests)}`);
+    report.push(`⚙️  Config: ${formatCheck(structure.hasConfig)}`);
+    report.push(`📌 Git Ignore: ${formatCheck(structure.hasGitIgnore)}`);
 
     // Dependencies
     report.push(chalk.bold('\nDependencies'));
@@ -42,14 +43,34 @@ function formatTextReport(analysis) {
     report.push(chalk.bold('\nSecurity'));
     report.push('──────────────────────────────────────────────────');
     report.push(`🔒 Package Lock: ${formatCheck(analysis.metrics.security.hasPackageLock)}`);
-    report.push(`📝 Environment Example: ${formatCheck(analysis.metrics.security.securityFiles.hasEnvExample)}`);
+    report.push(`📝 Environment Example: ${formatCheck(analysis.metrics.security?.securityFiles?.hasEnvExample)}`);
 
     // Code Quality
     report.push(chalk.bold('\nCode Quality'));
     report.push('──────────────────────────────────────────────────');
-    report.push(`🎨 ESLint: ${formatCheck(analysis.metrics.quality.linting.hasEslint)}`);
-    report.push(`✨ Prettier: ${formatCheck(analysis.metrics.quality.linting.hasPrettier)}`);
-    report.push(`📘 TypeScript: ${formatCheck(analysis.metrics.quality.typescript)}`);
+    const quality = analysis.metrics.quality || {};
+    const linting = quality.linting || {};
+    const testing = quality.testing || {};
+    
+    report.push(`🎨 ESLint: ${formatCheck(linting.hasEslint)}`);
+    report.push(`✨ Prettier: ${formatCheck(linting.hasPrettier)}`);
+    report.push(`📘 TypeScript: ${formatCheck(quality.typescript)}`);
+    report.push(`🧪 Testing Framework: ${formatCheck(testing.hasJest || testing.hasMocha)}`);
+    
+    if (typeof quality.maintainabilityIndex === 'number') {
+        report.push(`\nMaintainability Index: ${quality.maintainabilityIndex}/100`);
+        report.push(formatComplexityBar(quality.maintainabilityIndex / 5)); // Scale to match complexity bar
+    }
+    
+    if (quality.issues && quality.issues.length > 0) {
+        report.push('\nQuality Issues:');
+        quality.issues.slice(0, 5).forEach(issue => {
+            report.push(`  • ${issue}`);
+        });
+        if (quality.issues.length > 5) {
+            report.push(`  ... and ${quality.issues.length - 5} more issues`);
+        }
+    }
 
     // Performance Metrics
     if (analysis.metrics.performance) {
