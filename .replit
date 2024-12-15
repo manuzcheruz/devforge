@@ -69,7 +69,7 @@ args = "Template Basic Test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Test Remote Express App"
+args = "Test Remote Template 2"
 
 [[workflows.workflow]]
 name = "CLI Test"
@@ -268,7 +268,7 @@ task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-basic-project -t express-api -v minimal --vars \"port=3000,useTypescript=false\""
 
 [[workflows.workflow]]
-name = "Test Remote Express App"
+name = "Test Remote Template 2"
 author = "agent"
 
 [workflows.workflow.metadata]
@@ -279,8 +279,11 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd test-remote-project && rm -rf node_modules package-lock.json && npm cache clean --force && npm install && node app.js"
-waitForPort = 3000
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-app2 --url https://github.com/expressjs/express.git"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]
+
+[[ports]]
+localPort = 3000
+externalPort = 80
