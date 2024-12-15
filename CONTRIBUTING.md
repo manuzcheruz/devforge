@@ -1,6 +1,6 @@
-# Contributing to NodeForge
+# Contributing to NodeSmith
 
-First off, thank you for considering contributing to NodeForge! It's people like you that make NodeForge such a great tool.
+First off, thank you for considering contributing to NodeSmith! It's people like you that make NodeSmith such a great tool.
 
 ## Code of Conduct
 

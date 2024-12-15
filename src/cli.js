@@ -14,7 +14,7 @@ class CLI {
     setupCommands() {
         this.program
             .version('1.0.0')
-            .description('NodeForge - Node.js Development Workflow Automation Tool');
+            .description('NodeSmith - Node.js Development Workflow Automation Tool');
 
         this.program
             .command('init')
@@ -77,8 +77,8 @@ class CLI {
             .option('-s, --sync', 'Synchronize development environment')
             .option('-c, --check', 'Check environment consistency')
             .action(async (options) => {
-                const nodeForge = require('./index'); 
-                await nodeForge.syncEnvironment(options);
+                const nodeSmith = require('./index'); 
+                await nodeSmith.syncEnvironment(options);
             });
 
         this.program
@@ -88,8 +88,8 @@ class CLI {
             .option('-m, --mock', 'Generate API mocks')
             .option('-t, --test', 'Run API tests')
             .action(async (options) => {
-                const nodeForge = require('./index'); 
-                await nodeForge.manageAPI(options);
+                const nodeSmith = require('./index'); 
+                await nodeSmith.manageAPI(options);
             });
 
         this.program
@@ -99,8 +99,8 @@ class CLI {
             .option('-r, --run', 'Run microservices locally')
             .option('-d, --deploy', 'Deploy microservices')
             .action(async (options) => {
-                const nodeForge = require('./index'); 
-                await nodeForge.manageMicroservices(options);
+                const nodeSmith = require('./index'); 
+                await nodeSmith.manageMicroservices(options);
             });
 
         this.program
@@ -110,8 +110,8 @@ class CLI {
             .option('-b, --bundle', 'Optimize bundle size')
             .option('-m, --memory', 'Check memory usage')
             .action(async (options) => {
-                const nodeForge = require('./index'); 
-                await nodeForge.optimizePerformance(options);
+                const nodeSmith = require('./index'); 
+                await nodeSmith.optimizePerformance(options);
             });
 
         this.program
@@ -121,8 +121,8 @@ class CLI {
             .option('-l, --licenses', 'Check licenses')
             .option('-v, --vulnerabilities', 'Check vulnerabilities')
             .action(async (options) => {
-                const nodeForge = require('./index'); 
-                await nodeForge.analyzeSecurity(options);
+                const nodeSmith = require('./index'); 
+                await nodeSmith.analyzeSecurity(options);
             });
 
         this.program
@@ -133,8 +133,8 @@ class CLI {
             .option('-b, --backup [path]', 'Backup the database')
             .option('-r, --restore <path>', 'Restore database from backup')
             .action(async (options) => {
-                const nodeForge = require('./index'); 
-                await nodeForge.manageDatabase(options);
+                const nodeSmith = require('./index'); 
+                await nodeSmith.manageDatabase(options);
             });
 
         this.program
