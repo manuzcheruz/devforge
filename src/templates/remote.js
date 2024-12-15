@@ -5,8 +5,23 @@ const { logger } = require('../utils/logger');
 const os = require('os');
 const { URL } = require('url');
 const { minimatch } = require('minimatch');
+const crypto = require('crypto');
 
 class RemoteTemplateManager {
+    constructor() {
+        this.tempDir = path.join(os.tmpdir(), '.nodeforge-templates');
+        this.cacheDir = path.join(os.homedir(), '.nodeforge', 'template-cache');
+        this.cacheMetadataFile = path.join(this.cacheDir, 'metadata.json');
+        this.currentUrl = null;
+        this.init();
+    }
+
+    async init() {
+        await fs.mkdir(this.tempDir, { recursive: true });
+        await fs.mkdir(this.cacheDir, { recursive: true });
+        await this.initializeCache();
+    }
+
     detectTemplateSource(url) {
         try {
             const urlObj = new URL(url);
@@ -24,97 +39,427 @@ class RemoteTemplateManager {
         }
     }
 
-    constructor() {
-        this.tempDir = path.join(os.tmpdir(), '.nodeforge-templates');
-    }
-
-    async detectAndCheckoutDefaultBranch(repoPath) {
+    async initializeCache() {
         try {
-            // Remove any existing git configuration
-            await fs.rm(path.join(repoPath, '.git'), { recursive: true, force: true })
-                .catch(() => null);
-
-            // Initialize fresh git repository
-            execSync('git init', { cwd: repoPath, stdio: 'pipe' });
+            const exists = await fs.access(this.cacheMetadataFile)
+                .then(() => true)
+                .catch(() => false);
             
-            // Configure git to use HTTPS and token if available
-            const gitConfig = [
-                ['core.autocrlf', 'false'],
-                ['core.eol', 'lf'],
-                ['core.symlinks', 'false'],
-                ['http.sslVerify', 'true']
-            ];
-            
-            for (const [key, value] of gitConfig) {
-                execSync(`git config ${key} ${value}`, { cwd: repoPath, stdio: 'pipe' });
-            }
-
-            // Try to get the default branch name from remote
-            try {
-                // Add remote with authentication if token is available
-                const remoteUrl = this.currentUrl;
-                execSync(`git remote add origin "${remoteUrl}"`, {
-                    cwd: repoPath,
-                    stdio: 'pipe',
-                    env: {
-                        ...process.env,
-                        GIT_TERMINAL_PROMPT: '0'
-                    }
-                });
-                
-                // Fetch remote refs
-                execSync('git fetch origin', {
-                    cwd: repoPath,
-                    stdio: 'pipe',
-                    timeout: 120000, // 2 minutes timeout
-                    env: {
-                        ...process.env,
-                        GIT_TERMINAL_PROMPT: '0'
-                    }
-                });
-
-                // Try to detect default branch using ls-remote
-                const remoteRefs = execSync('git ls-remote --symref origin HEAD', {
-                    cwd: repoPath,
-                    encoding: 'utf8',
-                    stdio: 'pipe'
-                });
-
-                let defaultBranch = 'master'; // Default fallback
-                const refMatch = remoteRefs.match(/ref: refs\/heads\/([^\t\n]+)/);
-                if (refMatch) {
-                    defaultBranch = refMatch[1];
-                }
-
-                // Try to checkout the detected default branch
-                execSync(`git checkout -b ${defaultBranch} origin/${defaultBranch}`, {
-                    cwd: repoPath,
-                    stdio: 'pipe'
-                });
-
-                logger.success(`Successfully checked out branch: ${defaultBranch}`);
-                return defaultBranch;
-            } catch (error) {
-                // If checkout fails, try to at least fetch the files
-                try {
-                    execSync('git fetch origin master', {
-                        cwd: repoPath,
-                        stdio: 'pipe'
-                    });
-                    execSync('git checkout FETCH_HEAD', {
-                        cwd: repoPath,
-                        stdio: 'pipe'
-                    });
-                    logger.info('Checked out latest master branch content');
-                    return 'master';
-                } catch (fetchError) {
-                    logger.warn(`Branch detection and fetch failed: ${error.message}`);
-                    return 'master';
-                }
+            if (!exists) {
+                await fs.writeFile(
+                    this.cacheMetadataFile,
+                    JSON.stringify({
+                        version: '1.0.0',
+                        templates: {},
+                        lastCleanup: Date.now()
+                    }, null, 2)
+                );
             }
         } catch (error) {
-            logger.warn(`Failed to setup git: ${error.message}`);
-            return 'master'; // Fallback to master if everything fails
+            logger.warn(`Failed to initialize cache: ${error.message}`);
+        }
+    }
+
+    async getCacheKey(url, version = 'latest') {
+        const hash = crypto.createHash('sha256')
+            .update(`${url}#${version}`)
+            .digest('hex');
+        return hash.substring(0, 12);
+    }
+
+    async getCachedTemplate(url, version = 'latest') {
+        try {
+            const metadata = await this.getCacheMetadata();
+            const cacheKey = await this.getCacheKey(url, version);
+            const cachedTemplate = metadata.templates[cacheKey];
+
+            if (!cachedTemplate) {
+                return null;
+            }
+
+            // Check if cache is still valid (24 hours)
+            const cacheAge = Date.now() - cachedTemplate.timestamp;
+            if (cacheAge > 24 * 60 * 60 * 1000) {
+                delete metadata.templates[cacheKey];
+                await this.saveCacheMetadata(metadata);
+                return null;
+            }
+
+            const templatePath = path.join(this.cacheDir, cacheKey);
+            const exists = await fs.access(templatePath)
+                .then(() => true)
+                .catch(() => false);
+
+            if (!exists) {
+                delete metadata.templates[cacheKey];
+                await this.saveCacheMetadata(metadata);
+                return null;
+            }
+
+            logger.info(`Using cached template: ${url}@${version}`);
+            return {
+                path: templatePath,
+                ...cachedTemplate
+            };
+        } catch (error) {
+            logger.warn(`Cache lookup failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    async getCacheMetadata() {
+        try {
+            const content = await fs.readFile(this.cacheMetadataFile, 'utf-8');
+            return JSON.parse(content);
+        } catch (error) {
+            return { version: '1.0.0', templates: {}, lastCleanup: Date.now() };
+        }
+    }
+
+    async saveCacheMetadata(metadata) {
+        await fs.writeFile(
+            this.cacheMetadataFile,
+            JSON.stringify(metadata, null, 2)
+        );
+    }
+
+    async cleanCache() {
+        try {
+            const metadata = await this.getCacheMetadata();
+            const now = Date.now();
+            let cleaned = 0;
+
+            // Clean up old entries (older than 7 days)
+            for (const [key, template] of Object.entries(metadata.templates)) {
+                if (now - template.timestamp > 7 * 24 * 60 * 60 * 1000) {
+                    const cachePath = path.join(this.cacheDir, key);
+                    await fs.rm(cachePath, { recursive: true, force: true });
+                    delete metadata.templates[key];
+                    cleaned++;
+                }
+            }
+
+            metadata.lastCleanup = now;
+            await this.saveCacheMetadata(metadata);
+            
+            if (cleaned > 0) {
+                logger.info(`Cleaned ${cleaned} cached templates`);
+            }
+        } catch (error) {
+            logger.warn(`Cache cleanup failed: ${error.message}`);
+        }
+    }
+
+    async detectAndCheckoutDefaultBranch(repoPath, version = 'latest') {
+        try {
+            // First, try to checkout the specific version if provided
+            if (version && version !== 'latest') {
+                try {
+                    logger.info(`Attempting to checkout version: ${version}`);
+                    
+                    // Fetch all tags and refs with depth 1 to speed up the process
+                    logger.info('Fetching repository tags and refs...');
+                    execSync('git fetch --tags --force --depth=1 origin', {
+                        cwd: repoPath,
+                        stdio: 'pipe',
+                        timeout: 30000
+                    });
+
+                    // Get all available tags and parse them
+                    const tags = execSync('git tag', { cwd: repoPath, encoding: 'utf8' })
+                        .split('\n')
+                        .filter(Boolean)
+                        .map(tag => ({
+                            original: tag,
+                            normalized: tag.replace(/^v/, '').replace(/\.0$/, '')
+                        }))
+                        .sort((a, b) => {
+                            // Sort tags in descending order (newer versions first)
+                            return b.normalized.localeCompare(a.normalized, undefined, { numeric: true, sensitivity: 'base' });
+                        });
+
+                    logger.info(`Found ${tags.length} version tags`);
+
+                    // Try exact match first
+                    const normalizedVersion = version.replace(/^v/, '');
+                    const exactMatch = tags.find(tag => 
+                        tag.normalized === normalizedVersion || 
+                        tag.original === version ||
+                        tag.original === `v${version}`
+                    );
+
+                    if (exactMatch) {
+                        logger.info(`Found exact matching version: ${exactMatch.original}`);
+                        execSync(`git checkout ${exactMatch.original}`, {
+                            cwd: repoPath,
+                            stdio: 'pipe'
+                        });
+                        logger.success(`Successfully checked out version: ${exactMatch.original}`);
+                        return exactMatch.original;
+                    }
+
+                    // Try to find closest match based on semver
+                    const baseVersion = normalizedVersion.split('.')[0];
+                    const matchingTags = tags.filter(tag => 
+                        tag.normalized.startsWith(baseVersion + '.')
+                    );
+
+                    if (matchingTags.length > 0) {
+                        const closestMatch = matchingTags[0];
+                        logger.info(`Found closest matching version: ${closestMatch.original}`);
+                        execSync(`git checkout ${closestMatch.original}`, {
+                            cwd: repoPath,
+                            stdio: 'pipe'
+                        });
+                        logger.success(`Checked out closest matching version: ${closestMatch.original}`);
+                        return closestMatch.original;
+                    }
+
+                    logger.warn(`Version ${version} not found, falling back to default branch`);
+                } catch (versionError) {
+                    logger.warn(`Failed to checkout version ${version}: ${versionError.message}`);
+                }
+            }
+
+            // Fallback to default branch detection
+            const remoteRefs = execSync('git ls-remote --symref origin HEAD', {
+                cwd: repoPath,
+                encoding: 'utf8',
+                stdio: 'pipe'
+            });
+
+            let defaultBranch = 'master'; // Default fallback
+            const refMatch = remoteRefs.match(/ref: refs\/heads\/([^\t\n]+)/);
+            if (refMatch) {
+                defaultBranch = refMatch[1];
+            }
+
+            // Try to checkout the detected default branch
+            execSync(`git checkout -b ${defaultBranch} origin/${defaultBranch}`, {
+                cwd: repoPath,
+                stdio: 'pipe'
+            });
+
+            logger.success(`Successfully checked out branch: ${defaultBranch}`);
+            return defaultBranch;
+
+        } catch (error) {
+            logger.warn(`Branch detection and fetch failed: ${error.message}`);
+            return 'master';
+        }
+    }
+
+    async fetchTemplate(url, retries = 3, options = {}) {
+        const startTime = Date.now();
+        logger.info(`Fetching remote template from: ${url}`);
+        this.currentUrl = url;
+        
+        const { version = 'latest' } = options;
+        logger.info(`Requested template version: ${version}`);
+        
+        // Generate cache key for this template and version
+        const cacheKey = await this.getCacheKey(url, version);
+        
+        // Check cache first
+        logger.info('Checking template cache...');
+        const cachedTemplate = await this.getCachedTemplate(url, version);
+        if (cachedTemplate) {
+            logger.success(`Using cached template (version: ${version})`);
+            return cachedTemplate;
+        }
+        logger.info('No cached version found, fetching from remote...');
+        
+        // Detect template source
+        const templateSource = this.detectTemplateSource(url);
+        logger.info(`Detected template source: ${templateSource}`);
+        
+        let targetDir = '';
+        let attempt = 0;
+        const maxDelay = 30000; // Maximum delay between retries (30 seconds)
+
+        const createTempDir = async () => {
+            await fs.mkdir(this.tempDir, { recursive: true });
+            const tempDir = path.join(this.tempDir, `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+            await fs.rm(tempDir, { recursive: true, force: true }).catch(() => null);
+            await fs.mkdir(tempDir, { recursive: true });
+            return tempDir;
+        };
+
+        while (attempt < retries) {
+            try {
+                targetDir = await createTempDir();
+                
+                logger.info(`Cloning repository (attempt ${attempt + 1}/${retries})...`);
+                
+                execSync(
+                    `git clone --depth 1 --single-branch "${url}" "${targetDir}"`,
+                    { 
+                        stdio: 'pipe',
+                        timeout: 120000,
+                        env: {
+                            ...process.env,
+                            GIT_TERMINAL_PROMPT: '0',
+                            GIT_SSL_NO_VERIFY: '0',
+                            GIT_ASKPASS: 'echo'
+                        }
+                    }
+                );
+
+                // Check for express-specific files
+                const isExpressRepo = url.includes('expressjs/express.git');
+                const hasExpressGenerator = await fs.access(path.join(targetDir, 'bin', 'express-cli.js'))
+                    .then(() => true)
+                    .catch(() => false);
+                
+                if (isExpressRepo || hasExpressGenerator) {
+                    logger.info('Detected Express.js project template');
+                    
+                    // For Express main repo, use hello-world example
+                    if (isExpressRepo) {
+                        logger.info('Using hello-world example as template');
+                        const exampleDir = path.join(targetDir, 'examples', 'hello-world');
+                        targetDir = exampleDir;
+                    }
+                }
+
+                // Select specific version if provided
+                const selectedVersion = await this.detectAndCheckoutDefaultBranch(targetDir, version);
+                logger.info(`Using template version: ${selectedVersion}`);
+                
+                // Update template metadata
+                template.version = selectedVersion;
+                template.originalVersion = version;
+                
+                // Clean git files
+                await fs.rm(path.join(targetDir, '.git'), { recursive: true, force: true }).catch(() => null);
+                
+                const template = {
+                    url,
+                    path: targetDir,
+                    defaultBranch: selectedVersion,
+                    isExpressGenerator: hasExpressGenerator,
+                    packageJson: await this.readPackageJson(targetDir)
+                };
+
+                // Cache the template
+                await this.cacheTemplate(template, url, version);
+                
+                logger.success(`Template fetched and processed successfully`);
+                return template;
+
+            } catch (error) {
+                attempt++;
+                await fs.rm(targetDir, { recursive: true, force: true }).catch(() => null);
+                
+                if (attempt === retries) {
+                    throw new Error(`Failed to fetch template after ${retries} attempts: ${error.message}`);
+                }
+
+                const delay = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 2000, maxDelay);
+                logger.warn(`Retry ${attempt}/${retries} in ${Math.round(delay/1000)}s: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    async readPackageJson(templatePath) {
+        try {
+            const content = await fs.readFile(path.join(templatePath, 'package.json'), 'utf-8');
+            return JSON.parse(content);
+        } catch (error) {
+            logger.warn('No package.json found or invalid format');
+            return null;
+        }
+    }
+
+    async cacheTemplate(template, url, version) {
+        try {
+            const cacheKey = await this.getCacheKey(url, version);
+            const cachePath = path.join(this.cacheDir, cacheKey);
+            const metadata = await this.getCacheMetadata();
+            
+            // Ensure cache directory exists
+            await fs.mkdir(cachePath, { recursive: true });
+            
+            // Copy all template files recursively
+            const copyFiles = async (srcDir, destDir) => {
+                const entries = await fs.readdir(srcDir, { withFileTypes: true });
+                
+                for (const entry of entries) {
+                    const srcPath = path.join(srcDir, entry.name);
+                    const destPath = path.join(destDir, entry.name);
+                    
+                    if (entry.isDirectory()) {
+                        if (entry.name !== 'node_modules' && entry.name !== '.git') {
+                            await fs.mkdir(destPath, { recursive: true });
+                            await copyFiles(srcPath, destPath);
+                        }
+                    } else {
+                        await fs.copyFile(srcPath, destPath);
+                    }
+                }
+            };
+            
+            await copyFiles(template.path, cachePath);
+            
+            // Save template metadata
+            const templateMetadata = {
+                name: template.packageJson?.name || path.basename(url, '.git'),
+                version: template.version || version,
+                originalVersion: version,
+                url,
+                timestamp: Date.now(),
+                packageJson: template.packageJson,
+                isExpressGenerator: template.isExpressGenerator || false,
+                defaultBranch: template.defaultBranch || 'master'
+            };
+            
+            metadata.templates[cacheKey] = templateMetadata;
+            await this.saveCacheMetadata(metadata);
+            
+            await fs.writeFile(
+                path.join(cachePath, 'metadata.json'),
+                JSON.stringify(templateMetadata, null, 2)
+            );
+            
+            logger.success(`Template cached successfully: ${templateMetadata.name} (${version})`);
+            return cachePath;
+        } catch (error) {
+            logger.error(`Failed to cache template: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async cleanup() {
+        try {
+            await fs.rm(this.tempDir, { recursive: true, force: true });
+            logger.info('Cleaned up temporary files');
+        } catch (error) {
+            logger.warn(`Cleanup failed: ${error.message}`);
+        }
+    }
+
+    async loadTemplateFiles(template) {
+        try {
+            const { path: templatePath } = template;
+            logger.info(`Loading template files from: ${templatePath}`);
+            
+            const files = {};
+            const entries = await fs.readdir(templatePath, { withFileTypes: true });
+            
+            for (const entry of entries) {
+                if (entry.isFile() && !entry.name.startsWith('.')) {
+                    const filePath = path.join(templatePath, entry.name);
+                    const content = await fs.readFile(filePath, 'utf-8');
+                    files[entry.name] = content;
+                }
+            }
+            
+            logger.success(`Loaded ${Object.keys(files).length} template files successfully`);
+            return files;
+        } catch (error) {
+            logger.error(`Failed to load template files: ${error.message}`);
+            throw error;
         }
     }
 
@@ -235,483 +580,6 @@ class RemoteTemplateManager {
             throw new Error(`Template validation failed: ${error.message}`);
         }
     }
-
-    async fetchTemplate(url, retries = 3, options = {}) {
-        const startTime = Date.now();
-        logger.info(`Fetching remote template from: ${url}`);
-        this.currentUrl = url;  // Store the URL for later use
-        
-        // Detect template source
-        const templateSource = this.detectTemplateSource(url);
-        logger.info(`Detected template source: ${templateSource}`);
-        
-        let targetDir = '';
-        let attempt = 0;
-        const maxDelay = 30000; // Maximum delay between retries (30 seconds)
-        const { branch, shallow = true, depth = 1 } = options;
-
-        // Enhanced temp directory creation with cleanup
-        const createTempDir = async () => {
-            await fs.mkdir(this.tempDir, { recursive: true });
-            const tempDir = path.join(this.tempDir, `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-            // Clean any existing directory
-            await fs.rm(tempDir, { recursive: true, force: true }).catch(() => null);
-            await fs.mkdir(tempDir, { recursive: true });
-            return tempDir;
-        };
-
-        const prepareGitUrl = (originalUrl) => {
-            try {
-                if (!originalUrl.startsWith('https://github.com/')) {
-                    return originalUrl;
-                }
-
-                const tokenUrl = new URL(originalUrl);
-                if (process.env.GITHUB_TOKEN) {
-                    // Use token in the URL for authentication
-                    tokenUrl.username = process.env.GITHUB_TOKEN;
-                    logger.debug('Using authenticated GitHub URL');
-                    return tokenUrl.toString();
-                }
-
-                // For public repositories
-                logger.warn('No GitHub token found, using public access');
-                return originalUrl;
-            } catch (error) {
-                logger.warn(`Invalid URL format: ${error.message}, using original URL`);
-                return originalUrl;
-            }
-        };
-
-        const cleanupDirectory = async (dir) => {
-            if (!dir) return;
-            try {
-                await fs.rm(dir, { recursive: true, force: true });
-                logger.debug(`Cleaned up directory: ${dir}`);
-            } catch (error) {
-                logger.warn(`Failed to clean up directory ${dir}: ${error.message}`);
-            }
-        };
-
-        while (attempt < retries) {
-            try {
-                targetDir = await createTempDir();
-                const gitUrl = prepareGitUrl(url);
-                
-                logger.info(`Cloning repository (attempt ${attempt + 1}/${retries})...`);
-                
-                // Enhanced git clone with better error handling
-                const cloneProcess = execSync(
-                    `git clone --depth 1 --single-branch "${gitUrl}" "${targetDir}"`,
-                    { 
-                        stdio: 'pipe',
-                        timeout: 120000, // 2 minutes timeout
-                        env: {
-                            ...process.env,
-                            GIT_TERMINAL_PROMPT: '0',
-                            GIT_SSL_NO_VERIFY: '0',
-                            GIT_ASKPASS: 'echo', // Prevent credential prompt
-                            GIT_CONFIG_NOSYSTEM: '1', // Ignore system git config
-                            GIT_CONFIG_GLOBAL: '/dev/null' // Ignore global git config
-                        },
-                        maxBuffer: 10 * 1024 * 1024 // 10MB buffer
-                    }
-                );
-
-                // Verify repository contents
-                if (!await fs.access(path.join(targetDir, '.git'))
-                    .then(() => true)
-                    .catch(() => false)) {
-                    throw new Error('Git repository was not cloned correctly');
-                }
-
-                // Detect if this is the Express.js main repository
-                const isExpressMainRepo = url.includes('expressjs/express.git');
-                
-                if (isExpressMainRepo) {
-                    logger.info('Detected Express.js main repository');
-                    // We'll use the main directory as the template
-                    // The template files will be generated in loadTemplateFiles
-                }
-
-                // Check for express-generator specific files
-                const isExpressGenerator = await fs.access(path.join(targetDir, 'bin', 'express-cli.js'))
-                    .then(() => true)
-                    .catch(() => false);
-                
-                if (isExpressGenerator) {
-                    logger.info('Detected Express Generator template');
-                    // For Express generator, we'll skip git operations
-                    return {
-                        url,
-                        path: targetDir,
-                        packageJson: {
-                            name: 'express-app',
-                            version: '0.0.0',
-                            private: true,
-                            scripts: {
-                                start: 'node ./bin/www'
-                            },
-                            dependencies: {
-                                'cookie-parser': '~1.4.4',
-                                'debug': '~2.6.9',
-                                'express': '~4.16.1',
-                                'morgan': '~1.9.1'
-                            }
-                        },
-                        defaultBranch: 'master',
-                        isExpressGenerator: true
-                    };
-                }
-
-                logger.info('Processing as standard template');
-                // Detect and checkout default branch
-                const defaultBranch = await this.detectAndCheckoutDefaultBranch(targetDir);
-                logger.info(`Using default branch: ${defaultBranch}`);
-
-                // Clean git-related files
-                const filesToClean = [
-                    path.join(targetDir, '.git'),
-                    path.join(targetDir, '.gitignore'),
-                    path.join(targetDir, '.gitattributes'),
-                    path.join(targetDir, '.github'),
-                    path.join(targetDir, '.gitlab-ci.yml')
-                ];
-
-                await Promise.all(
-                    filesToClean.map(file => 
-                        fs.rm(file, { recursive: true, force: true }).catch(() => null)
-                    )
-                );
-
-                // Read package.json with fallback
-                const packageJson = await fs.readFile(path.join(targetDir, 'package.json'), 'utf-8')
-                    .then(content => JSON.parse(content))
-                    .catch(() => ({
-                        name: path.basename(targetDir),
-                        version: '0.0.1',
-                        description: isExpressGenerator ? 'Express application generator' : 'Remote template'
-                    }));
-
-                logger.success('Template fetched and processed successfully');
-                return {
-                    url,
-                    path: targetDir,
-                    packageJson,
-                    defaultBranch,
-                    isExpressGenerator
-                };
-
-            } catch (error) {
-                attempt++;
-                await cleanupDirectory(targetDir);
-                
-                if (attempt === retries) {
-                    throw new Error(`Failed to fetch template after ${retries} attempts: ${error.message}`);
-                }
-
-                // Exponential backoff with jitter
-                const delay = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 2000, maxDelay);
-                logger.warn(`Retry ${attempt}/${retries} in ${Math.round(delay/1000)}s: ${error.message}`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
-    }
-
-    async cleanup() {
-        try {
-            await fs.rm(this.tempDir, { recursive: true, force: true });
-            logger.info('Cleaned up temporary files');
-        } catch (error) {
-            logger.warn(`Cleanup failed: ${error.message}`);
-        }
-    }
-
-    async loadTemplateFiles(template) {
-        try {
-            const { path: templatePath } = template;
-            logger.info(`Loading template files from: ${templatePath}`);
-            
-            // Initialize templateFiles array
-            const templateFiles = [];
-            
-            // Special handling for Express.js repository
-            if (template.url && template.url.includes('expressjs/express.git')) {
-                logger.info('Processing Express.js repository as template...');
-                
-                // Create basic Express app structure for main repository
-                templateFiles.push({
-                    path: 'app.js',
-                    content: `const express = require('express');
-const path = require('path');
-const cookieParser = require('cookie-parser');
-const logger = require('morgan');
-const createError = require('http-errors');
-
-const indexRouter = require('./routes/index');
-const usersRouter = require('./routes/users');
-
-const app = express();
-const port = process.env.PORT || 3000;
-
-// View engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'jade');
-
-app.use(logger('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.use('/', indexRouter);
-app.use('/users', usersRouter);
-
-// Catch 404 and forward to error handler
-app.use((req, res, next) => {
-  next(createError(404));
-});
-
-// Error handler
-app.use((err, req, res, next) => {
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
-  res.status(err.status || 500);
-  res.render('error');
-});
-
-app.listen(port, '0.0.0.0', () => {
-  console.log('Listening on ' + port);
-});
-
-module.exports = app;`.trim()
-                });
-
-                // Add views
-                templateFiles.push({
-                    path: 'views/layout.jade',
-                    content: `doctype html
-html
-  head
-    title= title
-    link(rel='stylesheet', href='/stylesheets/style.css')
-  body
-    block content`.trim()
-                });
-
-                templateFiles.push({
-                    path: 'views/error.jade',
-                    content: `extends layout
-
-block content
-  h1= message
-  h2= error.status
-  pre #{error.stack}`.trim()
-                });
-
-                templateFiles.push({
-                    path: 'views/index.jade',
-                    content: `extends layout
-
-block content
-  h1= title
-  p Welcome to #{title}`.trim()
-                });
-
-                // Add public files
-                templateFiles.push({
-                    path: 'public/stylesheets/style.css',
-                    content: `body {
-  padding: 50px;
-  font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
-}
-
-a {
-  color: #00B7FF;
-}`.trim()
-                });
-
-                // Create routes
-                templateFiles.push({
-                    path: 'routes/index.js',
-                    content: `
-const express = require('express');
-const router = express.Router();
-
-router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Express' });
-});
-
-module.exports = router;
-`.trim()
-                });
-
-                templateFiles.push({
-                    path: 'routes/users.js',
-                    content: `
-const express = require('express');
-const router = express.Router();
-
-router.get('/', function(req, res, next) {
-  res.send('respond with a resource');
-});
-
-module.exports = router;
-`.trim()
-                });
-
-                // Create bin/www
-                templateFiles.push({
-                    path: 'bin/www',
-                    content: `#!/usr/bin/env node
-
-const app = require('../app');
-const debug = require('debug')('express-app:server');
-const http = require('http');
-
-const port = normalizePort(process.env.PORT || '3000');
-app.set('port', port);
-
-const server = http.createServer(app);
-server.listen(port);
-server.on('error', onError);
-server.on('listening', onListening);
-
-function normalizePort(val) {
-  const port = parseInt(val, 10);
-  if (isNaN(port)) {
-    return val;
-  }
-  if (port >= 0) {
-    return port;
-  }
-  return false;
-}
-
-function onError(error) {
-  if (error.syscall !== 'listen') {
-    throw error;
-  }
-  const bind = typeof port === 'string' ? 'Pipe ' + port : 'Port ' + port;
-  switch (error.code) {
-    case 'EACCES':
-      console.error(bind + ' requires elevated privileges');
-      process.exit(1);
-      break;
-    case 'EADDRINUSE':
-      console.error(bind + ' is already in use');
-      process.exit(1);
-      break;
-    default:
-      throw error;
-  }
-}
-
-function onListening() {
-  const addr = server.address();
-  const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
-  console.log('Listening on ' + bind);
-}
-`.trim()
-                });
-
-                // Create package.json specifically for Express
-                templateFiles.push({
-                    path: 'package.json',
-                    content: JSON.stringify({
-                        name: 'express-app',
-                        version: '0.0.0',
-                        private: true,
-                        scripts: {
-                            start: 'node ./bin/www'
-                        },
-                        dependencies: {
-                            'cookie-parser': '~1.4.4',
-                            'debug': '~2.6.9',
-                            'express': '~4.16.1',
-                            'http-errors': '~1.7.0',
-                            'jade': '~1.11.0',
-                            'morgan': '~1.9.1'
-                        }
-                    }, null, 2)
-                });
-
-                logger.success('Express.js repository processed successfully');
-            } else {
-                // Standard template processing
-                const ignorePatterns = [
-                    '**/node_modules/**',
-                    '**/.git/**',
-                    '**/.github/**',
-                    '**/test/**',
-                    '**/__tests__/**',
-                    '**/coverage/**',
-                    '**/*.test.*',
-                    '**/*.spec.*'
-                ];
-
-                const processDirectory = async (dirPath) => {
-                    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-                    for (const entry of entries) {
-                        const fullPath = path.join(dirPath, entry.name);
-                        const relativePath = path.relative(templatePath, fullPath);
-                        
-                        if (ignorePatterns.some(pattern => minimatch(relativePath, pattern, { dot: true }))) {
-                            continue;
-                        }
-
-                        if (entry.isDirectory()) {
-                            await processDirectory(fullPath);
-                        } else if (entry.isFile()) {
-                            try {
-                                const content = await fs.readFile(fullPath, 'utf-8');
-                                templateFiles.push({
-                                    path: relativePath,
-                                    content
-                                });
-                            } catch (error) {
-                                logger.warn(`Skipping file ${relativePath}: ${error.message}`);
-                            }
-                        }
-                    }
-                };
-                await processDirectory(templatePath);
-            }
-
-            if (templateFiles.length === 0) {
-                throw new Error('No valid template files found');
-            }
-
-            const files = Object.fromEntries(
-                templateFiles.map(file => [file.path, file.content])
-            );
-
-            logger.success(`Loaded ${templateFiles.length} template files successfully`);
-
-            // Create basic template configuration
-            const config = {
-                name: 'express-app',
-                version: '1.0.0',
-                description: 'Express.js application template',
-                variables: {
-                    port: '3000',
-                    useTypescript: 'false',
-                    includeDocs: 'true'
-                }
-            };
-
-            return {
-                ...template,
-                files,
-                config,
-                valid: true
-            };
-        } catch (error) {
-            logger.error(`Failed to load template files: ${error.message}`);
-            throw error;
-        }
-    }
-
 }
 
 module.exports = new RemoteTemplateManager();

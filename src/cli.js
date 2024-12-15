@@ -22,6 +22,7 @@ class CLI {
             .option('-n, --name <name>', 'Project name')
             .option('-v, --variant <variant>', 'Template variant to use (e.g., minimal, full)')
             .option('--url <url>', 'Remote template repository URL')
+            .option('--version <version>', 'Template version to use (tag, branch, or commit)')
             .option('--vars <variables>', 'Template variables in key=value format, comma separated')
             .action(async (options) => {
                 // Parse and validate variables from CLI
@@ -45,7 +46,15 @@ class CLI {
                     isRemote: !!options.url,
                     templateUrl: options.url
                 };
-                await createProject(projectConfig);
+                try {
+                    const result = await createProject(projectConfig);
+                    if (result.success) {
+                        logger.success(`Project ${projectConfig.name} created successfully${projectConfig.version ? ` with version ${projectConfig.version}` : ''}`);
+                    }
+                } catch (error) {
+                    logger.error(`Failed to create project: ${error.message}`);
+                    process.exit(1);
+                }
             });
 
         this.program

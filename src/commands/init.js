@@ -24,11 +24,13 @@ async function createProject(options, pluginManager) {
         if (options.url) {
             logger.info(`Fetching remote template from: ${options.url}`);
             try {
-                template = await remoteTemplateManager.fetchTemplate(options.url);
+                template = await remoteTemplateManager.fetchTemplate(options.url, 3, {
+                    version: options.version || 'latest'
+                });
                 template = await remoteTemplateManager.loadTemplateFiles(template);
                 template.isRemote = true;
                 template.url = options.url;
-                logger.success('Remote template fetched successfully');
+                logger.success(`Remote template fetched successfully${options.version ? ` (version: ${options.version})` : ''}`);
 
                 // Set default template configuration for remote templates
                 template.dependencies = template.dependencies || {};
