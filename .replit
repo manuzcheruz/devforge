@@ -17,10 +17,6 @@ args = "CLI Test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "CLI Test Create Project"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "CLI Test Remote"
 
 [[workflows.workflow.tasks]]
@@ -29,19 +25,11 @@ args = "Database Test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Template Test"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "Template Variant Test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "CLI Test Variables"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Plugin Test"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
@@ -90,20 +78,6 @@ task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"
 
 [[workflows.workflow]]
-name = "CLI Test Create Project"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-local-project -t express-api"
-
-[[workflows.workflow]]
 name = "CLI Test Remote"
 author = "agent"
 
@@ -132,20 +106,6 @@ task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js db --migrate"
 
 [[workflows.workflow]]
-name = "Template Test"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-template-project -t express-api"
-
-[[workflows.workflow]]
 name = "Template Variant Test"
 author = "agent"
 
@@ -172,20 +132,6 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-var-project -t express-api -v minimal --vars \"port=4000,useTypescript=true,includeTests=true,serverName=dev-server\""
-
-[[workflows.workflow]]
-name = "Plugin Test"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-plugin-project -t express-api -v full"
 
 [[workflows.workflow]]
 name = "Plugin System Test"

@@ -201,38 +201,50 @@ class ProjectAnalyzer {
                         };
                         
                         // Generate recommendations based on metrics
-                        if (name === 'quality') {
+                        if (name === 'quality' && result.value) {
                             const qualityMetrics = result.value;
                             
                             // Check for code duplication issues
-                            if (qualityMetrics.duplicationScore < 80) {
+                            const duplicationScore = qualityMetrics.duplicationScore ?? 100;
+                            if (duplicationScore < 80) {
+                                const duplicateDetails = [];
+                                if (Array.isArray(qualityMetrics.fileAnalyses)) {
+                                    duplicateDetails.push(...qualityMetrics.fileAnalyses
+                                        .filter(analysis => analysis && typeof analysis.duplicationScore === 'number' && analysis.duplicationScore < 80)
+                                        .map(analysis => ({
+                                            file: analysis.file || 'unknown',
+                                            duplicateScore: analysis.duplicationScore,
+                                            metrics: analysis.metrics?.duplication || {}
+                                        })));
+                                }
+                                
                                 recommendations.push({
                                     type: 'code-duplication',
                                     severity: 'medium',
-                                    message: `High code duplication detected (${100 - qualityMetrics.duplicationScore}% of code). Consider refactoring duplicate code into reusable functions or modules.`,
-                                    details: qualityMetrics.fileAnalyses
-                                        .filter(analysis => analysis.duplicationScore < 80)
-                                        .map(analysis => ({
-                                            file: analysis.file,
-                                            duplicateScore: analysis.duplicationScore,
-                                            metrics: analysis.metrics.duplication
-                                        }))
+                                    message: `High code duplication detected (${100 - duplicationScore}% of code). Consider refactoring duplicate code into reusable functions or modules.`,
+                                    details: duplicateDetails
                                 });
                             }
                             
                             // Check maintainability issues
-                            if (qualityMetrics.maintainabilityIndex < 70) {
+                            const maintainabilityIndex = qualityMetrics.maintainabilityIndex ?? 100;
+                            if (maintainabilityIndex < 70) {
+                                const maintainabilityDetails = [];
+                                if (Array.isArray(qualityMetrics.fileAnalyses)) {
+                                    maintainabilityDetails.push(...qualityMetrics.fileAnalyses
+                                        .filter(analysis => analysis && typeof analysis.maintainabilityScore === 'number' && analysis.maintainabilityScore < 70)
+                                        .map(analysis => ({
+                                            file: analysis.file || 'unknown',
+                                            score: analysis.maintainabilityScore,
+                                            metrics: analysis.metrics || {}
+                                        })));
+                                }
+                                
                                 recommendations.push({
                                     type: 'maintainability',
                                     severity: 'high',
-                                    message: `Low maintainability score (${qualityMetrics.maintainabilityIndex}/100). Consider improving code organization and documentation.`,
-                                    details: qualityMetrics.fileAnalyses
-                                        .filter(analysis => analysis.maintainabilityScore < 70)
-                                        .map(analysis => ({
-                                            file: analysis.file,
-                                            score: analysis.maintainabilityScore,
-                                            metrics: analysis.metrics
-                                        }))
+                                    message: `Low maintainability score (${maintainabilityIndex}/100). Consider improving code organization and documentation.`,
+                                    details: maintainabilityDetails
                                 });
                             }
                         }
@@ -344,14 +356,26 @@ class ProjectAnalyzer {
                 await this.getProjectContent(projectPath)
             );
 
-            // Update quality metrics
-            this.metrics.quality = {
-                ...this.metrics.quality,
-                linting: { hasEslint, hasPrettier },
-                testing: { hasJest, hasMocha },
-                testCoverage,
-                maintainabilityIndex,
-                issues: [] // Will be populated by issue detection
+            // Initialize metrics object with complete structure and default values
+            const metrics = {
+                linting: { 
+                    hasEslint: hasEslint || false, 
+                    hasPrettier: hasPrettier || false 
+                },
+                testing: { 
+                    hasJest: hasJest || false, 
+                    hasMocha: hasMocha || false 
+                },
+                maintainabilityIndex: maintainabilityIndex || 70,
+                issues: [],
+                fileAnalyses: [],
+                duplicationScore: 100, // Default to perfect score
+                testCoverage: {
+                    lines: 0,
+                    functions: 0,
+                    branches: 0,
+                    statements: 0
+                }
             };
 
             // Analyze and collect code quality issues
@@ -360,12 +384,14 @@ class ProjectAnalyzer {
                 const content = await fs.readFile(file, 'utf-8');
                 const fileIssues = this.qualityAnalyzer.detectCodeIssues(content);
                 if (fileIssues.length > 0) {
-                    this.metrics.quality.issues.push({
+                    metrics.issues.push({
                         file: path.relative(projectPath, file),
                         issues: fileIssues
                     });
                 }
             }
+            this.metrics.quality = {...this.metrics.quality, ...metrics};
+
         } catch (error) {
             logger.error(`Code quality analysis failed: ${error.message}`);
             throw error;
