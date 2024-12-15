@@ -56,6 +56,7 @@ class ProjectAnalyzer {
                     throw new Error('Project path must be a directory');
                 }
             } catch (error) {
+                logger.error(`Project path is not accessible: ${error.message}`);
                 throw new Error(`Project path is not accessible: ${error.message}`);
             }
 
@@ -157,7 +158,14 @@ class ProjectAnalyzer {
                     name: 'quality',
                     promise: (async () => {
                         logger.info('Analyzing code quality...');
-                        return await this.qualityAnalyzer.analyzeCodeQuality(normalizedPath, fs);
+                        const [qualityMetrics, testCoverage] = await Promise.all([
+                            this.qualityAnalyzer.analyzeCodeQuality(normalizedPath, fs),
+                            this.qualityAnalyzer.analyzeTestCoverage(normalizedPath, fs)
+                        ]);
+                        return {
+                            ...qualityMetrics,
+                            testCoverage
+                        };
                     })()
                 },
                 {
@@ -209,11 +217,7 @@ class ProjectAnalyzer {
             };
         } catch (error) {
             logger.error(`Project analysis failed: ${error.message}`);
-            return {
-                status: 'error',
-                error: error.message,
-                timestamp: new Date().toISOString()
-            };
+            throw new Error(`Project analysis failed: ${error.message}`);
         }
     }
 
@@ -280,6 +284,7 @@ class ProjectAnalyzer {
 
     async analyzeCodeQuality(projectPath) {
         try {
+            // Analyze linting configuration
             const hasEslint = await fs.access(path.join(projectPath, '.eslintrc'))
                 .then(() => true)
                 .catch(() => false);
@@ -287,18 +292,54 @@ class ProjectAnalyzer {
                 .then(() => true)
                 .catch(() => false);
 
-            this.metrics.quality.linting = { hasEslint, hasPrettier };
-            this.metrics.quality.testing = {
-                hasJest: await this.hasPackage(projectPath, 'jest'),
-                hasMocha: await this.hasPackage(projectPath, 'mocha')
+            // Analyze testing setup
+            const [hasJest, hasMocha] = await Promise.all([
+                this.hasPackage(projectPath, 'jest'),
+                this.hasPackage(projectPath, 'mocha')
+            ]);
+
+            // Get test coverage metrics
+            const testCoverage = await this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs);
+
+            // Calculate maintainability metrics
+            const maintainabilityIndex = await this.qualityAnalyzer.calculateMaintenanceScore(
+                await this.getProjectContent(projectPath)
+            );
+
+            // Update quality metrics
+            this.metrics.quality = {
+                ...this.metrics.quality,
+                linting: { hasEslint, hasPrettier },
+                testing: { hasJest, hasMocha },
+                testCoverage,
+                maintainabilityIndex,
+                issues: [] // Will be populated by issue detection
             };
 
-            this.metrics.quality.maintainabilityIndex = await this.calculateMaintainabilityIndex(projectPath);
-            this.metrics.quality.issues = [];
+            // Analyze and collect code quality issues
+            const sourceFiles = await this.findSourceFiles(projectPath);
+            for (const file of sourceFiles) {
+                const content = await fs.readFile(file, 'utf-8');
+                const fileIssues = this.qualityAnalyzer.detectCodeIssues(content);
+                if (fileIssues.length > 0) {
+                    this.metrics.quality.issues.push({
+                        file: path.relative(projectPath, file),
+                        issues: fileIssues
+                    });
+                }
+            }
         } catch (error) {
             logger.error(`Code quality analysis failed: ${error.message}`);
             throw error;
         }
+    }
+
+    async getProjectContent(projectPath) {
+        const sourceFiles = await this.findSourceFiles(projectPath);
+        const contents = await Promise.all(
+            sourceFiles.map(file => fs.readFile(file, 'utf-8'))
+        );
+        return contents.join('\n');
     }
 
     async calculateMaintainabilityIndex(projectPath) {

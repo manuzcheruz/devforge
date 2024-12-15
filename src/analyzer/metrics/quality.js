@@ -37,6 +37,9 @@ class QualityAnalyzer {
                 return this.defaultMetrics;
             }
 
+            // Analyze test coverage
+            const coverageMetrics = await this.analyzeTestCoverage(projectPath, fs);
+
             const [hasEslint, hasPrettier, hasTypeScript] = await Promise.all([
                 this.checkConfigFile(projectPath, '.eslintrc', fs),
                 this.checkConfigFile(projectPath, '.prettierrc', fs),
@@ -172,58 +175,162 @@ class QualityAnalyzer {
     }
 
     calculateFileMaintenanceScore(content) {
-        if (!content || typeof content !== 'string') {
-            return 70; // Default score for invalid input
-        }
-
         try {
-            const metrics = {
-                lines: content.split('\n').length,
-                comments: (content.match(/\/\*[\s\S]*?\*\/|\/\/.*/g) || []).length,
-                functions: (content.match(/function\s+\w+\s*\(|=>\s*{|\w+\s*:\s*function/g) || []).length,
-                complexity: (content.match(/if|else|for|while|do|switch|case|catch/g) || []).length,
-                declarationDensity: (content.match(/const|let|var|class|interface|type|enum/g) || []).length,
-                maxLineLength: Math.max(...content.split('\n').map(line => line.length))
-            };
-
             // Calculate base score
-            let score = 100;
-
-            // Penalize for complexity
-            score -= metrics.complexity * 2;
+            let score = 70;
             
-            // Penalize for too many functions in a single file
-            score -= Math.max(0, metrics.functions - 10) * 2;
+            // Add points for documentation
+            const commentLines = (content.match(/\/\*[\s\S]*?\*\/|\/\/.*/g) || []).length;
+            score += Math.min(10, commentLines * 0.5);
             
-            // Penalize for low comment ratio (if file is large enough)
-            if (metrics.lines > 50) {
-                const commentRatio = metrics.comments / metrics.lines;
-                if (commentRatio < 0.1) {
-                    score -= 10;
-                }
+            // Add points for consistent formatting
+            const indentationPattern = /^[ \t]+/gm;
+            const indentations = content.match(indentationPattern) || [];
+            const consistentIndentation = new Set(indentations).size <= 2;
+            if (consistentIndentation) score += 5;
+            
+            // Deduct points for code smells
+            const codeSmells = [
+                /TODO|FIXME/g,
+                /console\.(log|debug)/g,
+                /debugger/g
+            ];
+            
+            for (const smell of codeSmells) {
+                const matches = content.match(smell) || [];
+                score -= matches.length * 2;
             }
             
-            // Penalize for extremely long lines
-            if (metrics.maxLineLength > 100) {
-                score -= Math.min(10, (metrics.maxLineLength - 100) / 10);
-            }
-            
-            // Penalize for too many lines
-            if (metrics.lines > 300) {
-                score -= Math.min(20, (metrics.lines - 300) / 50);
-            }
-            
-            // Add small bonus for good declaration density
-            const declarationRatio = metrics.declarationDensity / metrics.lines;
-            if (declarationRatio > 0.1 && declarationRatio < 0.3) {
-                score += 5;
-            }
-
-            return Math.max(0, Math.min(100, Math.round(score * 10) / 10));
+            return Math.max(0, Math.min(100, score));
         } catch (error) {
             logger.warn(`Error calculating maintenance score: ${error.message}`);
             return 70; // Default score on error
         }
+    }
+
+    async analyzeTestCoverage(projectPath, fs) {
+        try {
+            const metrics = {
+                hasTestDirectory: false,
+                testFiles: 0,
+                coverageConfig: false,
+                testFrameworks: [],
+                coverageScore: 0
+            };
+
+            // Check for test directories
+            const testDirs = ['__tests__', 'test', 'tests', 'spec'];
+            for (const dir of testDirs) {
+                try {
+                    await fs.access(`${projectPath}/${dir}`);
+                    metrics.hasTestDirectory = true;
+                    break;
+                } catch {
+                    continue;
+                }
+            }
+
+            // Analyze configuration files
+            const configs = ['jest.config.js', '.nycrc', 'karma.conf.js'];
+            for (const config of configs) {
+                try {
+                    await fs.access(`${projectPath}/${config}`);
+                    metrics.coverageConfig = true;
+                    break;
+                } catch {
+                    continue;
+                }
+            }
+
+            // Count test files and analyze content
+            const sourceFiles = await this.findTestFiles(projectPath, fs);
+            metrics.testFiles = sourceFiles.length;
+
+            let totalAssertions = 0;
+            let totalDescribeBlocks = 0;
+
+            for (const file of sourceFiles) {
+                try {
+                    const content = await fs.readFile(file, 'utf-8');
+                    totalAssertions += (content.match(/expect\(|assert\./g) || []).length;
+                    totalDescribeBlocks += (content.match(/describe\(|context\(|suite\(/g) || []).length;
+                } catch (error) {
+                    logger.warn(`Error reading test file ${file}: ${error.message}`);
+                }
+            }
+
+            // Calculate coverage score
+            metrics.coverageScore = this.calculateTestCoverageScore(
+                metrics.hasTestDirectory,
+                metrics.coverageConfig,
+                metrics.testFiles,
+                totalAssertions,
+                totalDescribeBlocks
+            );
+
+            return metrics;
+        } catch (error) {
+            logger.warn(`Test coverage analysis failed: ${error.message}`);
+            return {
+                hasTestDirectory: false,
+                testFiles: 0,
+                coverageConfig: false,
+                testFrameworks: [],
+                coverageScore: 0
+            };
+        }
+    }
+
+    async findTestFiles(projectPath, fs) {
+        const testFiles = [];
+        const testPatterns = ['.test.', '.spec.', '-test.', '-spec.'];
+        
+        try {
+            const walk = async (dir) => {
+                const entries = await fs.readdir(dir, { withFileTypes: true });
+                
+                for (const entry of entries) {
+                    if (entry.name.startsWith('.') || entry.name === 'node_modules') {
+                        continue;
+                    }
+
+                    const fullPath = `${dir}/${entry.name}`;
+                    
+                    if (entry.isDirectory()) {
+                        await walk(fullPath);
+                    } else if (testPatterns.some(pattern => entry.name.includes(pattern))) {
+                        testFiles.push(fullPath);
+                    }
+                }
+            };
+
+            await walk(projectPath);
+            return testFiles;
+        } catch (error) {
+            logger.warn(`Error finding test files: ${error.message}`);
+            return [];
+        }
+    }
+
+    calculateTestCoverageScore(hasTestDir, hasConfig, numFiles, assertions, describes) {
+        let score = 0;
+        
+        // Base points for test infrastructure
+        if (hasTestDir) score += 20;
+        if (hasConfig) score += 20;
+        
+        // Points for test quantity and quality
+        if (numFiles > 0) {
+            score += Math.min(30, numFiles * 5); // Up to 30 points for number of test files
+            
+            const assertionsPerFile = assertions / numFiles;
+            score += Math.min(20, assertionsPerFile * 2); // Up to 20 points for assertions density
+            
+            const describesPerFile = describes / numFiles;
+            score += Math.min(10, describesPerFile * 2); // Up to 10 points for test organization
+        }
+        
+        return Math.min(100, Math.round(score));
     }
 }
 
