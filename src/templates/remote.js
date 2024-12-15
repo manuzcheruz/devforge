@@ -548,13 +548,13 @@ class RemoteTemplateManager {
             
             // Validate template configuration
             try {
-                const configPath = path.join(templatePath, 'nodesmith.json');
+                const configPath = path.join(templatePath, 'nodeforge.json');
                 const configContent = await fs.readFile(configPath, 'utf-8');
                 const config = JSON.parse(configContent);
                 
                 validationResult.details.configStatus = 'found';
                 if (!config.template) {
-                    warnings.push('nodesmith.json missing template configuration');
+                    warnings.push('nodeforge.json missing template configuration');
                 } else {
                     const requiredConfigFields = ['name', 'version', 'description'];
                     const missingFields = requiredConfigFields.filter(field => !config.template[field]);
