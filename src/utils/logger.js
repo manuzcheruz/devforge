@@ -22,6 +22,12 @@ class Logger {
         const progressBar = '█'.repeat(Math.floor(percent / 4)) + '░'.repeat(25 - Math.floor(percent / 4));
         console.log(`${chalk.cyan('⟳')} [${progressBar}] ${percent}% - ${message}`);
     }
+
+    debug(message) {
+        if (process.env.DEBUG || process.env.NODE_ENV === 'development') {
+            console.log(chalk.gray('🔍'), message);
+        }
+    }
     
     startOperation(message) {
         console.log(chalk.cyan('▶'), message);

@@ -308,6 +308,8 @@ class RemoteTemplateManager {
         try {
             logger.info('Starting template validation...');
             const fsExtra = require('fs-extra');
+            const path = require('path');
+            const { glob } = require('glob');
             
             // Ensure template directory exists
             if (!await fsExtra.pathExists(templateDir)) {
@@ -316,7 +318,7 @@ class RemoteTemplateManager {
 
             // Track validation progress and project characteristics
             const validation = {
-                hasPackageJson: false,
+                packageJsons: [],
                 hasSourceFiles: false,
                 hasTests: false,
                 hasDocumentation: false,
@@ -325,6 +327,74 @@ class RemoteTemplateManager {
                 errors: [],
                 warnings: []
             };
+
+            // Find all package.json files recursively
+            logger.info('Searching for package.json files...');
+            try {
+                const packageJsonPaths = await glob('**/package.json', {
+                    cwd: templateDir,
+                    ignore: ['**/node_modules/**'],
+                    dot: true
+                });
+
+                for (const packageJsonPath of packageJsonPaths) {
+                    const fullPath = path.join(templateDir, packageJsonPath);
+                    try {
+                        const content = await fsExtra.readFile(fullPath, 'utf-8');
+                        const packageJson = JSON.parse(content);
+                        validation.packageJsons.push({
+                            path: packageJsonPath,
+                            content: packageJson
+                        });
+                        logger.info(`Found valid package.json at: ${packageJsonPath}`);
+                    } catch (error) {
+                        logger.warn(`Invalid package.json at ${packageJsonPath}: ${error.message}`);
+                    }
+                }
+            } catch (error) {
+                logger.warn(`Error searching for package.json files: ${error.message}`);
+            }
+
+            // Validate found package.json files
+            logger.info('Validating package.json files...');
+            if (validation.packageJsons.length === 0) {
+                validation.errors.push('No valid package.json files found in the repository');
+            } else {
+                // Find the most suitable package.json (prefer root or main package)
+                const mainPackageJson = validation.packageJsons.find(pkg => 
+                    pkg.path === 'package.json' || // root package.json
+                    pkg.content.name === path.basename(templateDir) || // matches directory name
+                    pkg.content.private === true // workspace root
+                ) || validation.packageJsons[0]; // fallback to first found
+
+                logger.info(`Using package.json from: ${mainPackageJson.path}`);
+
+                // Validate the chosen package.json
+                const packageJson = mainPackageJson.content;
+                if (!packageJson.name) {
+                    validation.warnings.push(`package.json at ${mainPackageJson.path} missing "name" field`);
+                }
+                if (!packageJson.version) {
+                    validation.warnings.push(`package.json at ${mainPackageJson.path} missing "version" field`);
+                }
+                if (!packageJson.dependencies && !packageJson.devDependencies) {
+                    validation.warnings.push(`package.json at ${mainPackageJson.path} has no dependencies defined`);
+                }
+
+                // Store the main package.json path for later use
+                validation.mainPackageJson = mainPackageJson;
+            }
+
+            // Check for monorepo/workspace setup
+            const hasWorkspaces = validation.packageJsons.some(pkg => 
+                pkg.content.workspaces || 
+                (pkg.content.private === true && pkg.content.packages)
+            );
+            
+            if (hasWorkspaces) {
+                logger.info('Detected monorepo/workspace structure');
+                validation.isMonorepo = true;
+            }
 
             // Initialize with default configuration
             let templateConfig = {
@@ -467,18 +537,7 @@ class RemoteTemplateManager {
             const { glob } = require('glob');
             const path = require('path');
 
-            // Initialize metrics for structure detection
-            let fileCount = 0;
-            let directoryCount = 0;
-            const fileTypes = new Set();
-            const detectedFeatures = new Set();
-
-            // Track project characteristics
-            let hasTypeScript = false;
-            let hasTests = false;
-            let hasDocumentation = false;
-            let hasBuildConfig = false;
-
+            // Initialize configuration
             const config = {
                 files: {},
                 dependencies: {},
@@ -490,19 +549,92 @@ class RemoteTemplateManager {
                 throw new Error(`Template directory not found: ${templateDir}`);
             }
 
-            // Read package.json first if it exists
-            const packageJsonPath = path.join(templateDir, 'package.json');
-            if (await fsExtra.pathExists(packageJsonPath)) {
-                try {
-                    const packageJsonContent = await fsExtra.readFile(packageJsonPath, 'utf-8');
-                    const packageJson = JSON.parse(packageJsonContent);
-                    config.dependencies = packageJson.dependencies || {};
-                    config.devDependencies = packageJson.devDependencies || {};
-                    config.files['package.json'] = packageJsonContent;
-                    logger.info('Found package.json and loaded dependencies');
-                } catch (err) {
-                    logger.warn(`Error parsing package.json: ${err.message}`);
+            // Special handling for Express.js generator
+            const isExpressGenerator = await this.isExpressGenerator(templateDir);
+            if (isExpressGenerator) {
+                logger.info('Detected Express.js generator template');
+                return await this.processExpressTemplate(templateDir);
+            }
+
+            // Find all package.json files recursively
+            logger.info('Searching for package.json files recursively...');
+            const packageJsonPaths = await glob('**/package.json', {
+                cwd: templateDir,
+                ignore: ['**/node_modules/**'],
+                absolute: true
+            });
+
+            if (packageJsonPaths.length === 0) {
+                logger.warn('No package.json files found in repository');
+                // Create a default package.json if none found
+                const defaultPackageJson = {
+                    name: path.basename(templateDir),
+                    version: '1.0.0',
+                    description: 'Template generated from remote repository',
+                    main: 'index.js',
+                    scripts: {
+                        start: 'node index.js'
+                    },
+                    dependencies: {},
+                    devDependencies: {}
+                };
+                config.files['package.json'] = JSON.stringify(defaultPackageJson, null, 2);
+                logger.info('Created default package.json');
+            } else {
+                logger.info(`Found ${packageJsonPaths.length} package.json file(s)`);
+                
+                // Process and validate each package.json
+                const validPackages = [];
+                for (const packageJsonPath of packageJsonPaths) {
+                    try {
+                        const packageJsonContent = await fsExtra.readFile(packageJsonPath, 'utf-8');
+                        const packageJson = JSON.parse(packageJsonContent);
+                        
+                        // Enhanced validation criteria
+                        const isValid = packageJson.name && 
+                            typeof packageJson.name === 'string' &&
+                            (!packageJson.private || packageJson.workspaces);  // Allow workspace roots
+                        
+                        if (isValid) {
+                            validPackages.push({
+                                path: packageJsonPath,
+                                content: packageJson,
+                                isWorkspace: !!packageJson.workspaces,
+                                depth: packageJsonPath.split(path.sep).length
+                            });
+                            logger.info(`Valid package.json found at: ${path.relative(templateDir, packageJsonPath)}`);
+                        } else {
+                            logger.debug(`Invalid package.json at: ${path.relative(templateDir, packageJsonPath)}`);
+                        }
+                    } catch (err) {
+                        logger.warn(`Error processing ${packageJsonPath}: ${err.message}`);
+                        continue;
+                    }
                 }
+
+                if (validPackages.length > 0) {
+                    // Prioritize: 1. Root workspace, 2. Shallowest depth, 3. First found
+                    const mainPackage = validPackages
+                        .sort((a, b) => {
+                            if (a.isWorkspace !== b.isWorkspace) return b.isWorkspace - a.isWorkspace;
+                            return a.depth - b.depth;
+                        })[0];
+
+                    logger.info(`Selected main package.json: ${path.relative(templateDir, mainPackage.path)}`);
+                    
+                    // Update configuration
+                    config.dependencies = mainPackage.content.dependencies || {};
+                    config.devDependencies = mainPackage.content.devDependencies || {};
+                    config.files['package.json'] = JSON.stringify(mainPackage.content, null, 2);
+                    
+                    // Update template directory to the selected package location
+                    templateDir = path.dirname(mainPackage.path);
+                    logger.info(`Using directory as template root: ${path.relative(process.cwd(), templateDir)}`);
+                }
+            }
+
+            if (!config.files['package.json']) {
+                throw new Error('No valid package.json found in the repository or its subdirectories');
             }
 
             // Define file patterns to include
@@ -607,6 +739,160 @@ class RemoteTemplateManager {
     async detectAndCheckoutDefaultBranch(targetDir) {
         const { execSync } = require('child_process');
         try {
+    async isExpressGenerator(templateDir) {
+        try {
+            const path = require('path');
+            const fs = require('fs').promises;
+            
+            // Check for express-generator specific files
+            const binPath = path.join(templateDir, 'bin');
+            const templatePath = path.join(templateDir, 'templates');
+            
+            try {
+                await fs.access(binPath);
+                await fs.access(templatePath);
+                return true;
+            } catch {
+                return false;
+            }
+        } catch (error) {
+            logger.warn(`Error checking for Express generator: ${error.message}`);
+            return false;
+        }
+    }
+
+    async processExpressTemplate(templateDir) {
+        try {
+            logger.info('Processing Express.js generator template...');
+            const path = require('path');
+            const fsExtra = require('fs-extra');
+            
+            // Initialize configuration with Express.js defaults
+            const config = {
+                files: {},
+                dependencies: {
+                    'express': '^4.18.2',
+                    'cookie-parser': '~1.4.6',
+                    'debug': '~4.3.4',
+                    'morgan': '~1.10.0',
+                    'http-errors': '~2.0.0'
+                },
+                devDependencies: {}
+            };
+
+            // Read template files from express-generator
+            const templatesDir = path.join(templateDir, 'templates', 'js');
+            if (await fsExtra.pathExists(templatesDir)) {
+                const files = await fsExtra.readdir(templatesDir, { recursive: true });
+                
+                for (const file of files) {
+                    if ((await fsExtra.stat(path.join(templatesDir, file))).isFile()) {
+                        const content = await fsExtra.readFile(path.join(templatesDir, file), 'utf-8');
+                        const normalizedPath = file.split(path.sep).join('/');
+                        config.files[normalizedPath] = content;
+                        logger.info(`Added template file: ${normalizedPath}`);
+                    }
+                }
+            }
+
+            // Add package.json
+            const packageJson = {
+                name: 'express-app',
+                version: '0.0.0',
+                private: true,
+                scripts: {
+                    start: 'node ./bin/www',
+                    dev: 'nodemon ./bin/www'
+                },
+                dependencies: config.dependencies,
+                devDependencies: {
+                    'nodemon': '^3.0.2'
+                }
+            };
+            
+            config.files['package.json'] = JSON.stringify(packageJson, null, 2);
+            logger.info('Created Express.js package.json');
+
+            // Add basic Express.js application structure
+            if (!config.files['app.js']) {
+                config.files['app.js'] = `
+const express = require('express');
+const path = require('path');
+const cookieParser = require('cookie-parser');
+const logger = require('morgan');
+
+const indexRouter = require('./routes/index');
+
+const app = express();
+
+app.use(logger('dev'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.use('/', indexRouter);
+
+module.exports = app;
+`.trim();
+                logger.info('Created app.js');
+            }
+
+            // Add www binary
+            if (!config.files['bin/www']) {
+                config.files['bin/www'] = `#!/usr/bin/env node
+const app = require('../app');
+const debug = require('debug')('express-app:server');
+const http = require('http');
+
+const port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+const server = http.createServer(app);
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+function normalizePort(val) {
+    const port = parseInt(val, 10);
+    if (isNaN(port)) return val;
+    if (port >= 0) return port;
+    return false;
+}
+
+function onError(error) {
+    if (error.syscall !== 'listen') throw error;
+    const bind = typeof port === 'string' ? 'Pipe ' + port : 'Port ' + port;
+    
+    switch (error.code) {
+        case 'EACCES':
+            console.error(bind + ' requires elevated privileges');
+            process.exit(1);
+            break;
+        case 'EADDRINUSE':
+            console.error(bind + ' is already in use');
+            process.exit(1);
+            break;
+        default:
+            throw error;
+    }
+}
+
+function onListening() {
+    const addr = server.address();
+    const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
+    debug('Listening on ' + bind);
+}
+`.trim();
+                logger.info('Created bin/www');
+            }
+
+            return config;
+        } catch (error) {
+            logger.error(`Failed to process Express.js template: ${error.message}`);
+            throw error;
+        }
+    }
             // Get the default branch name
             const defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD | sed "s@^refs/remotes/origin/@@"', {
                 cwd: targetDir,
@@ -814,15 +1100,46 @@ a {
             
             // Detect project structure
             logger.info('Analyzing repository structure...');
-            const files = await fs.readdir(cloneDir);
             
-            // Basic structure validation
-            if (!files.includes('package.json')) {
-                // Try to find package.json in subdirectories
-                const foundPackageJson = await this.findFile(cloneDir, 'package.json');
-                if (!foundPackageJson) {
-                    throw new Error('Missing critical file: package.json');
+            // Search for package.json in the repository
+            let packageJsonPath = await this.findFile(cloneDir, 'package.json');
+            
+            if (!packageJsonPath) {
+                logger.info('No package.json found in root, checking subdirectories...');
+                
+                // Check if this is a templates or examples repository
+                const dirs = await fs.readdir(cloneDir, { withFileTypes: true });
+                const potentialTemplateDirectories = dirs.filter(dir => 
+                    dir.isDirectory() && !['node_modules', '.git', 'dist'].includes(dir.name)
+                );
+                
+                for (const dir of potentialTemplateDirectories) {
+                    const subPath = path.join(cloneDir, dir.name);
+                    logger.info(`Checking subdirectory: ${dir.name}`);
+                    
+                    try {
+                        packageJsonPath = await this.findFile(subPath, 'package.json');
+                        if (packageJsonPath) {
+                            logger.info(`Found valid package.json in subdirectory: ${dir.name}`);
+                            // Use the directory containing package.json as the template root
+                            return this.processRepository(subPath);
+                        }
+                    } catch (error) {
+                        logger.debug(`Error checking subdirectory ${dir.name}: ${error.message}`);
+                        continue;
+                    }
                 }
+                
+                logger.error('No package.json found in repository or its subdirectories');
+                throw new Error('No valid Node.js project structure found in the repository. Please ensure the repository contains a package.json file.');
+            }
+
+            // Read package.json to validate project structure
+            try {
+                const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+                logger.info(`Found valid package.json with name: ${packageJson.name}`);
+            } catch (error) {
+                throw new Error(`Invalid package.json: ${error.message}`);
             }
             
             // Template metadata
@@ -850,16 +1167,42 @@ a {
     }
     
     async findFile(dir, filename) {
-        const files = await fs.readdir(dir, { withFileTypes: true });
-        for (const file of files) {
-            if (file.isDirectory()) {
-                const found = await this.findFile(path.join(dir, file.name), filename);
-                if (found) return found;
-            } else if (file.name === filename) {
-                return path.join(dir, file.name);
+        try {
+            logger.info(`Searching for ${filename} in ${dir}...`);
+            const files = await fs.readdir(dir, { withFileTypes: true });
+            
+            // First, check current directory for the file
+            const directMatch = files.find(file => file.isFile() && file.name === filename);
+            if (directMatch) {
+                const fullPath = path.join(dir, directMatch.name);
+                logger.info(`Found ${filename} directly at: ${fullPath}`);
+                return fullPath;
             }
+            
+            // Then search subdirectories
+            for (const file of files) {
+                const fullPath = path.join(dir, file.name);
+                
+                // Skip common non-project directories
+                if (file.isDirectory() && !['node_modules', '.git', 'dist', 'build', 'coverage'].includes(file.name)) {
+                    try {
+                        const found = await this.findFile(fullPath, filename);
+                        if (found) {
+                            return found;
+                        }
+                    } catch (error) {
+                        logger.debug(`Error searching in subdirectory ${file.name}: ${error.message}`);
+                        continue;
+                    }
+                }
+            }
+            
+            logger.debug(`${filename} not found in ${dir}`);
+            return null;
+        } catch (error) {
+            logger.warn(`Error accessing directory ${dir}: ${error.message}`);
+            throw error;
         }
-        return null;
     }
 
     async cleanup() {
