@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs').promises;
 const path = require('path');
 const { logger } = require('../utils/logger');
@@ -23,123 +23,46 @@ class RemoteTemplateManager {
         }
     }
 
-    async fetchTemplate(repositoryUrl) {
-        const startTime = Date.now();
+    async fetchTemplate(url) {
         try {
-            logger.info(`Starting template fetch process from ${repositoryUrl}`);
-            const repoName = this.getRepoName(repositoryUrl);
-            const targetDir = path.join(this.tempDir, repoName);
-
-            // Enhanced initialization and validation
+            logger.info(`Starting template fetch process from ${url}`);
             logger.info('Validating repository URL and preparing environment...');
-            if (!this.isValidGitUrl(repositoryUrl)) {
-                throw new Error('Invalid Git repository URL format');
-            }
-
-            // Ensure clean temp directory exists
-            await fs.rm(targetDir, { recursive: true, force: true });
+            
+            // Create temp directory if it doesn't exist
             await fs.mkdir(this.tempDir, { recursive: true });
             
-            // Enhanced clone process with progress tracking
-            const cloneStartTime = Date.now();
             logger.info('Initiating repository clone...');
-            await this.cloneRepository(repositoryUrl, targetDir);
-            const cloneTime = ((Date.now() - cloneStartTime) / 1000).toFixed(1);
-            logger.info(`Repository cloned successfully in ${cloneTime}s`);
-
-            // Enhanced branch detection and checkout
-            try {
-                logger.info('Detecting and checking out default branch...');
-                await this.detectAndCheckoutDefaultBranch(targetDir);
-            } catch (branchError) {
-                // Non-critical error, continue with current branch
-                logger.warn(`Branch detection failed: ${branchError.message}. Continuing with current branch.`);
-            }
-
-            // Enhanced template validation with detailed feedback
-            logger.info('Beginning comprehensive template validation...');
-            const validationStartTime = Date.now();
             
-            // Validate core template structure
-            const template = await this.validateTemplate(targetDir);
+            // Clone repository with authentication
+            const cloneDir = path.join(this.tempDir, 'repo-' + Date.now());
+            const githubToken = process.env.GITHUB_TOKEN;
             
-            // Enhanced validation with detailed file and structure checks
-            const requiredFiles = ['package.json'];
-            const recommendedFiles = ['README.md', '.gitignore', 'src/index.js'];
-            const optionalFiles = ['.npmignore', 'LICENSE', 'CONTRIBUTING.md'];
-            const criticalErrors = [];
-            const warnings = [];
-            const suggestions = [];
-
-            // Comprehensive file validation with content checks
-            for (const file of requiredFiles) {
-                const filePath = path.join(targetDir, file);
-                try {
-                    await fs.access(filePath);
-                    const content = await fs.readFile(filePath, 'utf-8');
-                    
-                    // Additional validation for package.json
-                    if (file === 'package.json') {
-                        try {
-                            const pkg = JSON.parse(content);
-                            if (!pkg.name) warnings.push('package.json missing name field');
-                            if (!pkg.version) warnings.push('package.json missing version field');
-                            if (!pkg.scripts) warnings.push('package.json missing scripts section');
-                            logger.info('package.json validated successfully');
-                        } catch (e) {
-                            criticalErrors.push(`Invalid JSON in ${file}: ${e.message}`);
-                        }
-                    }
-                    logger.info(`Validated required file: ${file}`);
-                } catch (error) {
-                    criticalErrors.push(`Required file '${file}' validation failed: ${error.message}`);
-                }
+            if (!githubToken) {
+                throw new Error('GitHub token not found in environment variables');
             }
-
-            // Check recommended files with specific validations
-            for (const file of recommendedFiles) {
-                const filePath = path.join(targetDir, file);
-                try {
-                    await fs.access(filePath);
-                    if (file === 'README.md') {
-                        const content = await fs.readFile(filePath, 'utf-8');
-                        if (content.length < 100) {
-                            suggestions.push('README.md seems too brief. Consider adding more documentation.');
-                        }
-                    }
-                    logger.info(`Found recommended file: ${file}`);
-                } catch {
-                    warnings.push(`Recommended file '${file}' not found in template`);
-                }
+            
+            // Extract owner and repo from URL
+            const urlMatch = url.match(/github\.com[\/:]([^\/]+)\/([^\/]+?)(\.git)?$/);
+            if (!urlMatch) {
+                throw new Error('Invalid GitHub repository URL format');
             }
-
-            // Check optional files
-            for (const file of optionalFiles) {
-                const filePath = path.join(targetDir, file);
-                try {
-                    await fs.access(filePath);
-                    logger.info(`Found optional file: ${file}`);
-                } catch {
-                    suggestions.push(`Consider adding ${file} to improve template completeness`);
-                }
-            }
-
-            // Handle validation results
-            if (criticalErrors.length > 0) {
-                const errorMessage = criticalErrors.join('\n');
-                logger.error(`Template validation failed:\n${errorMessage}`);
-                throw new Error(errorMessage);
-            }
-
-            if (warnings.length > 0) {
-                warnings.forEach(warning => logger.warn(warning));
-            }
-
-            logger.success('Template validation successful');
+            
+            const [, owner, repo] = urlMatch;
+            const authenticatedUrl = `https://${githubToken}@github.com/${owner}/${repo}.git`;
+            
+            logger.info(`Cloning repository ${owner}/${repo}...`);
+            await exec(`git clone ${authenticatedUrl} ${cloneDir}`, { 
+                env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+            });
+            
+            logger.info('Repository cloned successfully');
+            
+            // Process repository contents
+            const template = await this.processRepository(cloneDir);
             return template;
         } catch (error) {
             logger.error(`Failed to fetch template: ${error.message}`);
-            await this.cleanup().catch(() => {});
+            await this.cleanup(); // Clean up on error
             throw error;
         }
     }
@@ -743,27 +666,84 @@ class RemoteTemplateManager {
                             // Process Express.js specific templates
                             if (entry.name === 'www.ejs') {
                                 files['bin/www'] = ejs.render(content, {
-                                    name: template.name,
-                                    port: template.variables?.port || 3000,
-                                    modules: {},
-                                    localModules: {}
+                                    name: template.name || 'app',
+                                    port: template.variables?.port || 3000
                                 });
                             } else if (entry.name === 'app.js.ejs') {
                                 files['app.js'] = ejs.render(content, {
+                                    name: template.name || 'app',
                                     view: template.variables?.view || 'jade',
+                                    uses: [
+                                        'logger("dev")',
+                                        'express.json()',
+                                        'express.urlencoded({ extended: false })',
+                                        'cookieParser()',
+                                        'express.static(path.join(__dirname, "public"))'
+                                    ],
                                     css: template.variables?.css || 'css',
+                                    uses: [
+                                        'logger("dev")',
+                                        'express.json()',
+                                        'express.urlencoded({ extended: false })',
+                                        'cookieParser()',
+                                        'express.static(path.join(__dirname, "public"))'
+                                    ],
                                     modules: {
-                                        'logger': 'morgan',
-                                        'bodyParser': 'body-parser',
+                                        'express': 'express',
                                         'path': 'path',
                                         'cookieParser': 'cookie-parser',
-                                        'debug': 'debug'
+                                        'logger': 'morgan'
                                     },
-                                    localModules: {
+                                    routes: {
                                         'indexRouter': './routes/index',
                                         'usersRouter': './routes/users'
                                     }
                                 });
+                                
+                                // Generate route files
+                                files['routes/index.js'] = `var express = require('express');
+var router = express.Router();
+
+/* GET home page. */
+router.get('/', function(req, res, next) {
+  res.render('index', { title: 'Express' });
+});
+
+module.exports = router;`;
+
+                                files['routes/users.js'] = `var express = require('express');
+var router = express.Router();
+
+/* GET users listing. */
+router.get('/', function(req, res, next) {
+  res.send('respond with a resource');
+});
+
+module.exports = router;`;
+
+                                // Generate view files
+                                files['views/index.jade'] = `extends layout
+
+block content
+  h1= title
+  p Welcome to #{title}`;
+
+                                files['views/layout.jade'] = `doctype html
+html
+  head
+    title= title
+    link(rel='stylesheet', href='/stylesheets/style.css')
+  body
+    block content`;
+
+                                files['public/stylesheets/style.css'] = `body {
+  padding: 50px;
+  font: 14px "Lucida Grande", Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: #00B7FF;
+}`;
                             } else {
                                 files[targetPath] = ejs.render(content, template.variables || {});
                             }
@@ -775,14 +755,18 @@ class RemoteTemplateManager {
                                 files['.gitignore'] = content;
                             } else if (relativePath.startsWith('templates/js/routes/')) {
                                 // Move route files to routes directory
-                                files[`routes/${path.basename(relativePath)}`] = content;
+                                const routePath = 'routes/' + path.basename(relativePath);
+                                files[routePath] = content;
                             } else if (relativePath.startsWith('templates/css/')) {
                                 // Move CSS files to public/stylesheets
-                                files[`public/stylesheets/${path.basename(relativePath)}`] = content;
+                                const cssPath = 'public/stylesheets/' + path.basename(relativePath);
+                                files[cssPath] = content;
                             } else if (relativePath.startsWith('templates/js/')) {
-                                // Process other JS files
-                                files[path.basename(relativePath)] = content;
+                                // Move JavaScript files to appropriate directory
+                                const jsPath = path.basename(relativePath);
+                                files[jsPath] = content;
                             } else {
+                                // Default file handling
                                 files[relativePath] = content;
                             }
                         }
@@ -797,20 +781,93 @@ class RemoteTemplateManager {
             files['public/images/.gitkeep'] = '';
             files['views/.gitkeep'] = '';
             
-            return {
-                ...template,
-                files
-            };
+            logger.info(`Loaded ${Object.keys(files).length} template files`);
+            return files;
         } catch (error) {
+            logger.error(`Failed to load template files: ${error.message}`);
             throw new Error(`Failed to load template files: ${error.message}`);
         }
+    }
+    
+    async processRepository(cloneDir) {
+        try {
+            logger.info('Processing cloned repository...');
+            
+            // Get default branch without checkout
+            const defaultBranch = await this.getDefaultBranch(cloneDir);
+            logger.info(`Detected default branch: ${defaultBranch}`);
+            
+            // Initialize repository if needed
+            await exec('git init', { cwd: cloneDir });
+            
+            // Add remote and fetch
+            await exec('git remote add origin ' + this.currentUrl, { cwd: cloneDir });
+            await exec('git fetch origin', { cwd: cloneDir });
+            
+            // Checkout default branch
+            try {
+                await exec(`git checkout ${defaultBranch}`, { cwd: cloneDir });
+            } catch (error) {
+                // If branch doesn't exist, create it
+                await exec(`git checkout -b ${defaultBranch}`, { cwd: cloneDir });
+            }
+            
+            // Detect project structure
+            logger.info('Analyzing repository structure...');
+            const files = await fs.readdir(cloneDir);
+            
+            // Basic structure validation
+            if (!files.includes('package.json')) {
+                // Try to find package.json in subdirectories
+                const foundPackageJson = await this.findFile(cloneDir, 'package.json');
+                if (!foundPackageJson) {
+                    throw new Error('Missing critical file: package.json');
+                }
+            }
+            
+            // Template metadata
+            const template = {
+                name: path.basename(cloneDir),
+                path: cloneDir,
+                files: await this.loadTemplateFiles(cloneDir)
+            };
+            
+            logger.info('Repository processed successfully');
+            return template;
+        } catch (error) {
+            logger.error(`Failed to process repository: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async getDefaultBranch(cloneDir) {
+        try {
+            const { stdout } = await exec('git remote show origin | grep "HEAD branch" | cut -d" " -f5', { cwd: cloneDir });
+            return stdout.trim() || 'main';
+        } catch (error) {
+            return 'main';
+        }
+    }
+    
+    async findFile(dir, filename) {
+        const files = await fs.readdir(dir, { withFileTypes: true });
+        for (const file of files) {
+            if (file.isDirectory()) {
+                const found = await this.findFile(path.join(dir, file.name), filename);
+                if (found) return found;
+            } else if (file.name === filename) {
+                return path.join(dir, file.name);
+            }
+        }
+        return null;
     }
 
     async cleanup() {
         try {
             await fs.rm(this.tempDir, { recursive: true, force: true });
+            logger.info('Cleaned up temporary files');
         } catch (error) {
-            logger.warn(`Failed to cleanup temporary files: ${error.message}`);
+            logger.warn(`Failed to clean up: ${error.message}`);
         }
     }
 }
