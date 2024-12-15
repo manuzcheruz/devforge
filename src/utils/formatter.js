@@ -65,7 +65,7 @@ function formatTextReport(analysis) {
     if (quality.issues && quality.issues.length > 0) {
         report.push('\nQuality Issues:');
         quality.issues.slice(0, 5).forEach(issue => {
-            report.push(`  • ${issue}`);
+            report.push(`  • ${issue.message || issue.type}: ${issue.file || 'Project-wide'}`);
         });
         if (quality.issues.length > 5) {
             report.push(`  ... and ${quality.issues.length - 5} more issues`);

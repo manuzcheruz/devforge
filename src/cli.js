@@ -143,8 +143,9 @@ class CLI {
             .option('-f, --format <format>', 'Output format (json, text)', 'text')
             .option('-o, --output <file>', 'Save analysis to file')
             .action(async (path, options) => {
-                const analyzer = require('./analyzer');
+                const ProjectAnalyzer = require('./analyzer');
                 try {
+                    const analyzer = new ProjectAnalyzer();
                     const analysis = await analyzer.analyzeProject(path);
                     
                     if (options.format === 'json') {

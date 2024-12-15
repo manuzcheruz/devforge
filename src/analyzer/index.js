@@ -4,6 +4,10 @@ const { logger } = require('../utils/logger');
 
 class ProjectAnalyzer {
     constructor() {
+        this.initializeMetrics();
+    }
+
+    initializeMetrics() {
         this.metrics = {
             structure: {
                 hasPackageJson: false,
@@ -103,20 +107,60 @@ class ProjectAnalyzer {
             logger.info('Starting project analysis...');
             
             // Validate project path
-            if (!await this.validateProjectPath(projectPath)) {
-                throw new Error(`Invalid project path: ${projectPath}`);
-            }
+            await this.validateProjectPath(projectPath);
+
+            // Initialize metrics with default values
+            this.metrics = {
+                structure: {
+                    hasPackageJson: false,
+                    hasReadme: false,
+                    hasTests: false,
+                    hasConfig: false,
+                    hasGitIgnore: false,
+                    directoryStructure: {},
+                    sourceFiles: []
+                },
+                dependencies: {
+                    direct: 0,
+                    dev: 0,
+                    peer: 0,
+                    production: [],
+                    development: [],
+                    outdated: [],
+                    deprecated: []
+                },
+                security: {
+                    hasPackageLock: false,
+                    vulnerabilities: [],
+                    securityFiles: {
+                        hasNvmrc: false,
+                        hasEnvExample: false,
+                        hasDotenv: false
+                    }
+                },
+                quality: {
+                    linting: {
+                        hasEslint: false,
+                        hasPrettier: false
+                    },
+                    testing: {
+                        hasJest: false,
+                        hasMocha: false,
+                        testCount: 0
+                    },
+                    typescript: false,
+                    maintainabilityIndex: 0,
+                    issues: []
+                },
+                complexity: {
+                    average: 0,
+                    highest: 0,
+                    files: []
+                }
+            };
 
             // Run all analyses in parallel for better performance
-            const [
-                structure,
-                dependencies,
-                security,
-                quality,
-                practices,
-                performance,
-                complexity
-            ] = await Promise.all([
+            await Promise.all([
                 this.analyzeStructure(projectPath),
                 this.analyzeDependencies(projectPath),
                 this.analyzeSecurity(projectPath),
@@ -125,17 +169,6 @@ class ProjectAnalyzer {
                 this.analyzePerformance(projectPath),
                 this.analyzeComplexity(projectPath)
             ]);
-
-            // Update metrics with results
-            Object.assign(this.metrics, {
-                structure,
-                dependencies,
-                security,
-                quality,
-                practices,
-                performance,
-                complexity
-            });
 
             // Generate report with recommendations
             const report = this.generateReport();
@@ -155,9 +188,12 @@ class ProjectAnalyzer {
     async validateProjectPath(projectPath) {
         try {
             const stats = await fs.stat(projectPath);
-            return stats.isDirectory();
-        } catch {
-            return false;
+            if (!stats.isDirectory()) {
+                throw new Error(`Path exists but is not a directory: ${projectPath}`);
+            }
+            return true;
+        } catch (error) {
+            throw new Error(`Project path does not exist: ${projectPath}`);
         }
     }
 
@@ -798,48 +834,132 @@ class ProjectAnalyzer {
     async analyzeComplexity(projectPath) {
         logger.info('Analyzing code complexity...');
         try {
-            const metrics = {
-                cyclomaticComplexity: {
-                    average: 0,
-                    files: {}
-                },
-                maintainability: {
-                    score: 0,
-                    issues: []
-                }
-            };
-
             const sourceFiles = await this.findSourceFiles(projectPath);
             let totalComplexity = 0;
-            let fileCount = 0;
+            let highestComplexity = 0;
+            const complexityData = [];
 
             for (const file of sourceFiles) {
                 const content = await fs.readFile(file, 'utf-8');
-                const complexity = this.calculateFileComplexity(content);
+                // Calculate cyclomatic complexity based on code patterns
+                const complexity = this.calculateComplexity(content);
                 const relativePath = path.relative(projectPath, file);
                 
-                metrics.cyclomaticComplexity.files[relativePath] = complexity;
+                complexityData.push({ path: relativePath, complexity });
                 totalComplexity += complexity;
-                fileCount++;
+                highestComplexity = Math.max(highestComplexity, complexity);
 
                 // Check maintainability issues
-                const issues = this.checkMaintainabilityIssues(content, relativePath);
-                metrics.maintainability.issues.push(...issues);
+                if (complexity > 10) {
+                    this.metrics.quality.issues.push({
+                        type: 'complexity',
+                        message: `High complexity (${complexity.toFixed(1)}) in ${relativePath}`,
+                        file: relativePath
+                    });
+                }
             }
 
-            metrics.cyclomaticComplexity.average = fileCount > 0 ? 
-                totalComplexity / fileCount : 0;
+            this.metrics.complexity = {
+                cyclomaticComplexity: {
+                    average: sourceFiles.length > 0 ? totalComplexity / sourceFiles.length : 0,
+                    highest: highestComplexity,
+                    files: complexityData
+                },
+                maintainability: {
+                    score: this.calculateMaintainabilityScore(),
+                    issues: this.metrics.quality.issues.filter(issue => issue.type === 'complexity')
+                }
+            };
+
+            // Update maintainability index based on complexity
+            // Calculate maintainability index based on multiple factors
+            const baseScore = 70; // Start with a base score
+            const issuesPenalty = Math.min(30, this.metrics.quality.issues.length * 2);
+            const complexityPenalty = Math.min(20, this.metrics.complexity.average);
             
-            // Calculate maintainability score (0-100)
-            metrics.maintainability.score = Math.max(0, Math.min(100,
-                100 - (metrics.maintainability.issues.length * 5) -
-                (metrics.cyclomaticComplexity.average * 2)
+            // Add points for good practices
+            let bonusPoints = 0;
+            if (this.metrics.quality.linting.hasEslint) bonusPoints += 10;
+            if (this.metrics.quality.testing.hasJest || this.metrics.quality.testing.hasMocha) bonusPoints += 10;
+            if (this.metrics.structure.hasReadme) bonusPoints += 5;
+            if (this.metrics.security.hasPackageLock) bonusPoints += 5;
+            
+            const maintenanceScore = Math.max(0, Math.min(100,
+                baseScore - issuesPenalty - complexityPenalty + bonusPoints
             ));
 
-            this.metrics.complexity = metrics;
+            this.metrics.quality.maintainabilityIndex = maintenanceScore;
+            return this.metrics.complexity;
         } catch (error) {
             logger.error(`Complexity analysis failed: ${error.message}`);
-            throw error;
+            return { average: 0, highest: 0, files: [] };
+        }
+    }
+
+    calculateComplexity(content) {
+        let complexity = 0;
+        
+        // Count control structures that increase cyclomatic complexity
+        const patterns = [
+            /if\s*\(/g,           // if statements
+            /else\s+if\s*\(/g,    // else if statements
+            /for\s*\(/g,          // for loops
+            /while\s*\(/g,        // while loops
+            /do\s*{/g,            // do-while loops
+            /\?\s*\w+\s*:/g,      // ternary operators
+            /case\s+[\w'"]/g,     // case statements
+            /catch\s*\(/g,        // catch blocks
+            /&&|\|\|/g,           // logical operators
+            /function\s*\w*\s*\(/g, // function declarations
+            /=>\s*{/g             // arrow functions with blocks
+        ];
+
+        patterns.forEach(pattern => {
+            const matches = content.match(pattern);
+            complexity += matches ? matches.length : 0;
+        });
+
+        // Add base complexity of 1 for the function/file itself
+        return complexity + 1;
+    }
+
+    calculateFileComplexity(filePath, content) {
+        try {
+            const complexity = this.calculateComplexity(content);
+            return {
+                path: filePath,
+                complexity,
+                details: {
+                    size: content.length,
+                    lines: content.split('\n').length
+                }
+            };
+        } catch (error) {
+            logger.error(`Failed to calculate complexity for ${filePath}: ${error.message}`);
+            return {
+                path: filePath,
+                complexity: 1,
+                details: {
+                    size: content.length,
+                    lines: content.split('\n').length,
+                    error: error.message
+                }
+            };
+        }
+    }
+            if (this.metrics.quality.linting.hasEslint) bonusPoints += 10;
+            if (this.metrics.quality.testing.hasJest || this.metrics.quality.testing.hasMocha) bonusPoints += 10;
+            if (this.metrics.structure.hasReadme) bonusPoints += 5;
+            if (this.metrics.security.hasPackageLock) bonusPoints += 5;
+            
+            this.metrics.quality.maintainabilityIndex = Math.max(0, Math.min(100,
+                baseScore - issuesPenalty - complexityPenalty + bonusPoints
+            ));
+
+            return this.metrics.complexity;
+        } catch (error) {
+            logger.error(`Complexity analysis failed: ${error.message}`);
+            return { average: 0, highest: 0, files: [] };
         }
     }
 
@@ -1003,4 +1123,4 @@ class ProjectAnalyzer {
     }
 }
 
-module.exports = new ProjectAnalyzer();
+module.exports = ProjectAnalyzer;
