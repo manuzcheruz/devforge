@@ -25,15 +25,30 @@ class PerformanceAnalyzerPlugin extends BasePlugin {
 
     async execute(context) {
         const { projectPath } = context;
-        
-        // Example performance analysis
-        const analysis = {
-            timestamp: new Date().toISOString(),
-            metrics: await this.analyzeMetrics(projectPath),
-            recommendations: this.generateRecommendations()
-        };
+        const logger = require('../../utils/logger');
 
-        return analysis;
+        try {
+            logger.info('Starting performance analysis...');
+            
+            const startTime = Date.now();
+            const analysis = {
+                timestamp: new Date().toISOString(),
+                metrics: await this.analyzeMetrics(projectPath),
+                recommendations: await this.generateDetailedRecommendations(projectPath),
+                score: 0 // Will be calculated based on metrics
+            };
+
+            // Calculate overall performance score
+            analysis.score = this.calculatePerformanceScore(analysis.metrics);
+            
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+            logger.success(`Performance analysis completed in ${duration}s`);
+            
+            return analysis;
+        } catch (error) {
+            logger.error(`Performance analysis failed: ${error.message}`);
+            throw error;
+        }
     }
 
     async analyzeMetrics(projectPath) {
@@ -312,18 +327,105 @@ class PerformanceAnalyzerPlugin extends BasePlugin {
         return Math.max(0, Math.min(100, score));
     }
 
-    generateRecommendations() {
+    async generateDetailedRecommendations(projectPath) {
         const recommendations = [];
-        
-        if (this.metrics.bundleSize > 1024 * 1024) {
-            recommendations.push({
-                type: 'optimization',
-                severity: 'medium',
-                message: 'Consider optimizing bundle size to improve load times'
-            });
-        }
+        const logger = require('../../utils/logger');
 
-        return recommendations;
+        try {
+            const metrics = await this.analyzeMetrics(projectPath);
+
+            // Bundle size recommendations
+            if (metrics.bundleSize.total > 5 * 1024 * 1024) {
+                recommendations.push({
+                    type: 'optimization',
+                    severity: 'high',
+                    category: 'bundle',
+                    message: 'Bundle size is critically large',
+                    details: 'Large bundle sizes significantly impact initial load times',
+                    suggestion: 'Implement code splitting and lazy loading for routes',
+                    impact: 'High impact on user experience and load times'
+                });
+            } else if (metrics.bundleSize.total > 1024 * 1024) {
+                recommendations.push({
+                    type: 'optimization',
+                    severity: 'medium',
+                    category: 'bundle',
+                    message: 'Bundle size could be optimized',
+                    suggestion: 'Consider implementing tree shaking and dead code elimination'
+                });
+            }
+
+            // Dependencies recommendations
+            if (metrics.dependencies.heavyDependencies.length > 0) {
+                recommendations.push({
+                    type: 'dependencies',
+                    severity: 'medium',
+                    category: 'dependencies',
+                    message: `Found ${metrics.dependencies.heavyDependencies.length} heavy dependencies`,
+                    details: `Heavy dependencies: ${metrics.dependencies.heavyDependencies.map(d => d.name).join(', ')}`,
+                    suggestion: 'Consider lighter alternatives or implement code splitting'
+                });
+            }
+
+            // Async patterns recommendations
+            if (metrics.asyncUsage.callbacks > metrics.asyncUsage.asyncAwait) {
+                recommendations.push({
+                    type: 'modernization',
+                    severity: 'low',
+                    category: 'async',
+                    message: 'High usage of callback patterns detected',
+                    suggestion: 'Migrate to async/await for better readability and maintainability'
+                });
+            }
+
+            // Runtime metrics recommendations
+            if (metrics.runtime.eventLoopUtilization > 0.8) {
+                recommendations.push({
+                    type: 'performance',
+                    severity: 'high',
+                    category: 'runtime',
+                    message: 'High event loop utilization detected',
+                    suggestion: 'Consider optimizing CPU-intensive operations or using worker threads'
+                });
+            }
+
+            return recommendations.sort((a, b) => 
+                this.getSeverityWeight(b.severity) - this.getSeverityWeight(a.severity)
+            );
+        } catch (error) {
+            logger.error(`Error generating recommendations: ${error.message}`);
+            return [];
+        }
+    }
+
+    getSeverityWeight(severity) {
+        const weights = { high: 3, medium: 2, low: 1 };
+        return weights[severity] || 0;
+    }
+
+    calculatePerformanceScore(metrics) {
+        let score = 100;
+
+        // Bundle size impact (max -30 points)
+        if (metrics.bundleSize.total > 5 * 1024 * 1024) score -= 30;
+        else if (metrics.bundleSize.total > 1024 * 1024) score -= 15;
+
+        // Dependencies impact (max -20 points)
+        const heavyDepsCount = metrics.dependencies.heavyDependencies.length;
+        if (heavyDepsCount > 5) score -= 20;
+        else if (heavyDepsCount > 0) score -= heavyDepsCount * 4;
+
+        // Async patterns impact (max -20 points)
+        const asyncRatio = metrics.asyncUsage.asyncAwait / 
+            (metrics.asyncUsage.callbacks || 1);
+        if (asyncRatio < 0.5) score -= 20;
+        else if (asyncRatio < 1) score -= 10;
+
+        // Runtime metrics impact (max -30 points)
+        if (metrics.runtime.eventLoopUtilization > 0.8) score -= 30;
+        else if (metrics.runtime.eventLoopUtilization > 0.6) score -= 15;
+
+        return Math.max(0, Math.min(100, Math.round(score)));
     }
 
     async cleanup() {

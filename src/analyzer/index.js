@@ -1,12 +1,43 @@
 const fs = require('fs').promises;
 const path = require('path');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 class ProjectAnalyzer {
     constructor() {
         // Constants for file traversal
         this.ignoreDirs = new Set(['node_modules', 'coverage', 'dist', 'build', '.git']);
         this.sourceExtensions = new Set(['.js', '.jsx', '.ts', '.tsx']);
+        
+        // Initialize metrics storage
+        this.metrics = {
+            structure: {},
+            dependencies: {},
+            quality: {},
+            complexity: {},
+            performance: {},
+            security: {}
+        };
+
+        // Bind all class methods
+        const methods = [
+            'findSourceFiles',
+            'analyzeProject',
+            'analyzeStructure',
+            'analyzeDependencies',
+            'analyzeCodeQuality',
+            'analyzeComplexity',
+            'analyzePerformance',
+            'analyzeSecurityMetrics',
+            'calculateFileMetrics',
+            'calculateComplexity',
+            'fileExists'
+        ];
+        
+        methods.forEach(method => {
+            if (typeof this[method] === 'function') {
+                this[method] = this[method].bind(this);
+            }
+        });
     }
 
     async findSourceFiles(projectPath) {
@@ -49,36 +80,165 @@ class ProjectAnalyzer {
     }
 
     async analyzeProject(projectPath) {
+        if (!projectPath) {
+            throw new Error('Project path is required');
+        }
+
         try {
-            const analysis = {
-                metrics: {
-                    structure: await this.analyzeStructure(projectPath),
-                    dependencies: await this.analyzeDependencies(projectPath),
-                    quality: await this.analyzeCodeQuality(projectPath),
-                    complexity: await this.analyzeComplexity(projectPath),
-                    performance: await this.analyzePerformance(projectPath),
-                    security: await this.analyzeSecurityMetrics(projectPath)
-                }
+            // Reset metrics
+            this.metrics = {
+                structure: {},
+                dependencies: {},
+                quality: {},
+                complexity: {},
+                performance: {},
+                security: {}
             };
-            return analysis;
+
+            // Check if project path exists and is accessible
+            const exists = await this.fileExists(projectPath);
+            if (!exists) {
+                throw new Error(`Project path does not exist: ${projectPath}`);
+            }
+
+            // Verify project structure
+            const isValidProject = await this.validateProjectStructure(projectPath);
+            if (!isValidProject.valid) {
+                throw new Error(`Invalid project structure: ${isValidProject.reason}`);
+            }
+
+            logger.info('Starting project analysis...');
+            const startTime = Date.now();
+
+            // Run all analysis in parallel for better performance
+            const [
+                structure,
+                dependencies,
+                quality,
+                complexity,
+                performance,
+                security
+            ] = await Promise.allSettled([
+                this.analyzeStructure(projectPath),
+                this.analyzeDependencies(projectPath),
+                this.analyzeCodeQuality(projectPath),
+                this.analyzeComplexity(projectPath),
+                this.analyzePerformance(projectPath),
+                this.analyzeSecurityMetrics(projectPath)
+            ]);
+
+            // Process results and handle errors
+            const metrics = {
+                structure: this.processAnalysisResult(structure, 'structure'),
+                dependencies: this.processAnalysisResult(dependencies, 'dependencies'),
+                quality: this.processAnalysisResult(quality, 'quality'),
+                complexity: this.processAnalysisResult(complexity, 'complexity'),
+                performance: this.processAnalysisResult(performance, 'performance'),
+                security: this.processAnalysisResult(security, 'security')
+            };
+
+            // Store results in metrics
+            this.metrics = metrics;
+
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+            logger.success(`Project analysis completed in ${duration}s`);
+
+            return {
+                metrics,
+                timestamp: new Date().toISOString(),
+                duration: `${duration}s`,
+                status: 'success'
+            };
         } catch (error) {
             logger.error(`Project analysis failed: ${error.message}`);
-            throw error;
+            return {
+                metrics: this.metrics,
+                timestamp: new Date().toISOString(),
+                status: 'error',
+                error: error.message
+            };
+        }
+    }
+
+    async validateProjectStructure(projectPath) {
+        try {
+            const packageJsonExists = await this.fileExists(path.join(projectPath, 'package.json'));
+            if (!packageJsonExists) {
+                return { valid: false, reason: 'Missing package.json file' };
+            }
+
+            const sourceFiles = await this.findSourceFiles(projectPath);
+            if (sourceFiles.length === 0) {
+                return { valid: false, reason: 'No source files found' };
+            }
+
+            return { valid: true };
+        } catch (error) {
+            return { valid: false, reason: error.message };
+        }
+    }
+
+    processAnalysisResult(result, metricType) {
+        if (result.status === 'fulfilled') {
+            return result.value;
+        } else {
+            logger.error(`Error in ${metricType} analysis: ${result.reason}`);
+            return {
+                error: result.reason.message,
+                status: 'error'
+            };
         }
     }
 
     async analyzeStructure(projectPath) {
         try {
-            const hasPackageJson = await this.fileExists(path.join(projectPath, 'package.json'));
-            const hasReadme = await this.fileExists(path.join(projectPath, 'README.md'));
+            const fs = require('fs').promises;
+            const path = require('path');
             
+            // Basic structure checks
+            const [hasPackageJson, hasReadme] = await Promise.all([
+                this.fileExists(path.join(projectPath, 'package.json')),
+                this.fileExists(path.join(projectPath, 'README.md'))
+            ]);
+
+            // Find source files
+            const sourceFiles = await this.findSourceFiles(projectPath);
+            
+            // Analyze package.json if it exists
+            let packageInfo = {};
+            if (hasPackageJson) {
+                try {
+                    const packageData = JSON.parse(
+                        await fs.readFile(path.join(projectPath, 'package.json'), 'utf-8')
+                    );
+                    packageInfo = {
+                        name: packageData.name,
+                        version: packageData.version,
+                        hasScripts: Boolean(packageData.scripts && Object.keys(packageData.scripts).length > 0),
+                        hasDevDependencies: Boolean(packageData.devDependencies && Object.keys(packageData.devDependencies).length > 0)
+                    };
+                } catch (e) {
+                    logger.warn(`Error parsing package.json: ${e.message}`);
+                }
+            }
+
             return {
                 hasPackageJson,
-                hasReadme
+                hasReadme,
+                sourceFiles: sourceFiles.map(file => path.relative(projectPath, file)),
+                packageInfo,
+                fileCount: sourceFiles.length
             };
         } catch (error) {
             logger.error(`Structure analysis failed: ${error.message}`);
-            return { hasPackageJson: false, hasReadme: false };
+            return {
+                hasPackageJson: false,
+                hasReadme: false,
+                sourceFiles: [],
+                packageInfo: {},
+                fileCount: 0,
+                error: error.message
+            };
         }
     }
 
@@ -130,36 +290,130 @@ class ProjectAnalyzer {
     calculateFileMetrics(content) {
         const metrics = {
             maintainability: 0,
-            issues: []
+            issues: [],
+            details: {
+                linesOfCode: 0,
+                commentLines: 0,
+                codeLines: 0,
+                emptyLines: 0,
+                complexity: 0,
+                functionCount: 0
+            }
         };
         
-        // Simple metrics calculation
-        const lines = content.split('\n');
-        const loc = lines.length;
-        const commentLines = lines.filter(line => line.trim().startsWith('//')).length;
-        const codeLines = loc - commentLines;
+        try {
+            // Enhanced metrics calculation
+            const lines = content.split('\n');
+            metrics.details.linesOfCode = lines.length;
+            
+            // Count different types of lines
+            lines.forEach(line => {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) {
+                    metrics.details.emptyLines++;
+                } else if (trimmedLine.startsWith('//') || trimmedLine.startsWith('/*') || trimmedLine.endsWith('*/')) {
+                    metrics.details.commentLines++;
+                } else {
+                    metrics.details.codeLines++;
+                }
+                
+                // Count function declarations
+                if (trimmedLine.match(/function\s+\w+\s*\(|=>|class\s+\w+/)) {
+                    metrics.details.functionCount++;
+                }
+            });
+            
+            // Calculate complexity
+            metrics.details.complexity = this.calculateComplexity(content);
+            
+            // Enhanced maintainability calculation using multiple factors
+            const commentRatio = metrics.details.commentLines / metrics.details.codeLines;
+            const sizeScore = Math.max(0, 100 - (metrics.details.codeLines / 500 * 20));
+            const complexityScore = Math.max(0, 100 - (metrics.details.complexity / 10 * 20));
+            const documentationScore = Math.min(100, commentRatio * 200);
+            
+            metrics.maintainability = Math.round(
+                (sizeScore * 0.4) + (complexityScore * 0.4) + (documentationScore * 0.2)
+            );
+            
+            // Enhanced issue detection
+            this.detectIssues(metrics);
+            
+            return metrics;
+        } catch (error) {
+            logger.error(`Error calculating file metrics: ${error.message}`);
+            return {
+                maintainability: 0,
+                issues: [{
+                    type: 'error',
+                    message: 'Failed to analyze file metrics'
+                }],
+                details: {
+                    linesOfCode: 0,
+                    commentLines: 0,
+                    codeLines: 0,
+                    emptyLines: 0,
+                    complexity: 0,
+                    functionCount: 0
+                }
+            };
+        }
+    }
+    
+    detectIssues(metrics) {
+        const { details } = metrics;
         
-        // Basic maintainability calculation
-        metrics.maintainability = Math.max(0, Math.min(100, 
-            100 - (codeLines / 1000 * 20) + (commentLines / codeLines * 40)
-        ));
-        
-        // Basic issue detection
-        if (codeLines > 300) {
+        // File size issues
+        if (details.codeLines > 300) {
             metrics.issues.push({
                 type: 'complexity',
-                message: 'File exceeds recommended size of 300 lines'
+                severity: 'warning',
+                message: 'File exceeds recommended size of 300 lines',
+                recommendation: 'Consider splitting the file into smaller modules'
             });
         }
         
-        if (commentLines / codeLines < 0.1) {
+        // Documentation issues
+        const commentRatio = details.commentLines / details.codeLines;
+        if (commentRatio < 0.1) {
             metrics.issues.push({
                 type: 'documentation',
-                message: 'Low comment ratio, consider adding more documentation'
+                severity: 'info',
+                message: 'Low comment ratio detected',
+                recommendation: 'Consider adding more documentation to improve code maintainability'
             });
         }
         
-        return metrics;
+        // Complexity issues
+        if (details.complexity > 15) {
+            metrics.issues.push({
+                type: 'complexity',
+                severity: 'error',
+                message: 'High cyclomatic complexity detected',
+                recommendation: 'Refactor complex logic into smaller, more manageable functions'
+            });
+        }
+        
+        // Function count issues
+        if (details.functionCount > 10) {
+            metrics.issues.push({
+                type: 'structure',
+                severity: 'warning',
+                message: 'High number of functions in a single file',
+                recommendation: 'Consider splitting functionality across multiple files'
+            });
+        }
+        
+        // Empty lines ratio check
+        const emptyLineRatio = details.emptyLines / details.linesOfCode;
+        if (emptyLineRatio < 0.1) {
+            metrics.issues.push({
+                type: 'readability',
+                severity: 'info',
+                message: 'Low number of empty lines',
+                recommendation: 'Add more whitespace to improve code readability'
+            });
+        }
     }
 
     async analyzeComplexity(projectPath) {
@@ -186,20 +440,62 @@ class ProjectAnalyzer {
     }
 
     calculateComplexity(content) {
-        // Simple cyclomatic complexity calculation
-        const controlFlowKeywords = [
-            'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'catch', '&&', '||'
-        ];
-        
-        let complexity = 1; // Base complexity
-        for (const keyword of controlFlowKeywords) {
-            const matches = content.match(new RegExp(`\\b${keyword}\\b`, 'g'));
-            if (matches) {
-                complexity += matches.length;
+        try {
+            let complexity = 1; // Base complexity
+            const metrics = {
+                controlFlow: 0,
+                nesting: 0,
+                functionComplexity: 0
+            };
+
+            // Control flow complexity
+            const controlFlowKeywords = [
+                'if', 'else', 'for', 'while', 'do', 'switch', 'case', 
+                'catch', '&&', '||', '?', 'return', 'break', 'continue'
+            ];
+            
+            for (const keyword of controlFlowKeywords) {
+                const matches = content.match(new RegExp(`\\b${keyword}\\b`, 'g'));
+                if (matches) {
+                    metrics.controlFlow += matches.length;
+                    complexity += matches.length;
+                }
             }
+
+            // Nesting complexity
+            const lines = content.split('\n');
+            let currentNesting = 0;
+            let maxNesting = 0;
+            
+            for (const line of lines) {
+                const openBraces = (line.match(/{/g) || []).length;
+                const closeBraces = (line.match(/}/g) || []).length;
+                
+                currentNesting += openBraces - closeBraces;
+                maxNesting = Math.max(maxNesting, currentNesting);
+            }
+            
+            metrics.nesting = maxNesting;
+            complexity += maxNesting * 2; // Nesting levels contribute more to complexity
+
+            // Function complexity
+            const functionMatches = content.match(/function\s+\w+\s*\(|\)\s*=>\s*{/g);
+            if (functionMatches) {
+                metrics.functionComplexity = functionMatches.length;
+                complexity += functionMatches.length;
+            }
+
+            // Add complexity for class declarations and methods
+            const classMatches = content.match(/class\s+\w+|static\s+\w+|get\s+\w+|set\s+\w+/g);
+            if (classMatches) {
+                complexity += classMatches.length;
+            }
+
+            return Math.min(100, complexity); // Cap complexity at 100
+        } catch (error) {
+            logger.error(`Error calculating complexity: ${error.message}`);
+            return 1; // Return base complexity on error
         }
-        
-        return complexity;
     }
 
     async analyzePerformance(projectPath) {
@@ -254,4 +550,4 @@ class ProjectAnalyzer {
     }
 }
 
-module.exports = new ProjectAnalyzer();
+module.exports = { ProjectAnalyzer };
