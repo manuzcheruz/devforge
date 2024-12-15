@@ -188,6 +188,7 @@ class ProjectAnalyzer {
 
             const analysisResults = await Promise.allSettled(analysisPromises.map(({ promise }) => promise));
             const warnings = [];
+            const recommendations = [];
 
             // Process results and handle failures
             analysisResults.forEach((result, index) => {
@@ -198,6 +199,43 @@ class ProjectAnalyzer {
                             ...this.metrics[name],
                             ...result.value
                         };
+                        
+                        // Generate recommendations based on metrics
+                        if (name === 'quality') {
+                            const qualityMetrics = result.value;
+                            
+                            // Check for code duplication issues
+                            if (qualityMetrics.duplicationScore < 80) {
+                                recommendations.push({
+                                    type: 'code-duplication',
+                                    severity: 'medium',
+                                    message: `High code duplication detected (${100 - qualityMetrics.duplicationScore}% of code). Consider refactoring duplicate code into reusable functions or modules.`,
+                                    details: qualityMetrics.fileAnalyses
+                                        .filter(analysis => analysis.duplicationScore < 80)
+                                        .map(analysis => ({
+                                            file: analysis.file,
+                                            duplicateScore: analysis.duplicationScore,
+                                            metrics: analysis.metrics.duplication
+                                        }))
+                                });
+                            }
+                            
+                            // Check maintainability issues
+                            if (qualityMetrics.maintainabilityIndex < 70) {
+                                recommendations.push({
+                                    type: 'maintainability',
+                                    severity: 'high',
+                                    message: `Low maintainability score (${qualityMetrics.maintainabilityIndex}/100). Consider improving code organization and documentation.`,
+                                    details: qualityMetrics.fileAnalyses
+                                        .filter(analysis => analysis.maintainabilityScore < 70)
+                                        .map(analysis => ({
+                                            file: analysis.file,
+                                            score: analysis.maintainabilityScore,
+                                            metrics: analysis.metrics
+                                        }))
+                                });
+                            }
+                        }
                     }
                 } else {
                     const errorMessage = `${name} analysis failed: ${result.reason.message}`;

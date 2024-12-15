@@ -1,336 +1,199 @@
+const path = require('path');
 const { logger } = require('../../utils/logger');
 
 class QualityAnalyzer {
-    constructor() {
-        this.defaultMetrics = {
-            linting: {
-                hasEslint: false,
-                hasPrettier: false
-            },
-            typescript: false,
-            testing: {
-                hasJest: false,
-                hasMocha: false
-            },
-            maintainabilityIndex: 70,
-            issues: []
-        };
-    }
-
     async analyzeCodeQuality(projectPath, fs) {
-        if (!projectPath || typeof projectPath !== 'string') {
-            logger.error('Invalid project path provided');
-            return this.defaultMetrics;
-        }
-
-        if (!fs || typeof fs.readFile !== 'function' || typeof fs.access !== 'function') {
-            logger.error('Invalid filesystem interface provided');
-            return this.defaultMetrics;
-        }
-
         try {
-            // Validate project directory exists
-            try {
-                await fs.access(projectPath);
-            } catch (error) {
-                logger.error(`Project path is not accessible: ${error.message}`);
-                return this.defaultMetrics;
-            }
+            // Analyze linting configuration
+            const hasEslint = await fs.access(path.join(projectPath, '.eslintrc'))
+                .then(() => true)
+                .catch(() => false);
+            const hasPrettier = await fs.access(path.join(projectPath, '.prettierrc'))
+                .then(() => true)
+                .catch(() => false);
 
-            // Analyze test coverage
-            const coverageMetrics = await this.analyzeTestCoverage(projectPath, fs);
-
-            const [hasEslint, hasPrettier, hasTypeScript] = await Promise.all([
-                this.checkConfigFile(projectPath, '.eslintrc', fs),
-                this.checkConfigFile(projectPath, '.prettierrc', fs),
-                this.checkConfigFile(projectPath, 'tsconfig.json', fs)
-            ]);
-
+            // Analyze testing setup
             const [hasJest, hasMocha] = await Promise.all([
-                this.hasPackage(projectPath, 'jest', fs),
-                this.hasPackage(projectPath, 'mocha', fs)
+                this.hasPackage(projectPath, 'jest'),
+                this.hasPackage(projectPath, 'mocha')
             ]);
 
-            const maintainabilityData = await this.calculateMaintainabilityIndex(projectPath, fs);
-            
-            return {
+            // Calculate maintainability metrics
+            const maintainabilityIndex = await this.calculateMaintenanceScore(
+                await this.getProjectContent(projectPath)
+            );
+
+            // Update quality metrics
+            const metrics = {
                 linting: { hasEslint, hasPrettier },
-                typescript: hasTypeScript,
                 testing: { hasJest, hasMocha },
-                maintainabilityIndex: maintainabilityData.score,
-                issues: maintainabilityData.issues || []
+                maintainabilityIndex,
+                issues: []
             };
-        } catch (error) {
-            logger.error(`Code quality analysis failed: ${error.message}`);
-            return {
-                ...this.defaultMetrics,
-                issues: [{
-                    type: 'error',
-                    message: `Analysis failed: ${error.message}`,
-                    severity: 'high'
-                }]
-            };
-        }
-    }
 
-    async checkConfigFile(projectPath, filename, fs) {
-        if (!projectPath || !filename || !fs) {
-            return false;
-        }
-
-        try {
-            const variations = [
-                filename,
-                `${filename}.json`,
-                `${filename}.js`,
-                `${filename}.yaml`,
-                `${filename}.yml`
-            ];
-
-            for (const variant of variations) {
-                try {
-                    await fs.access(`${projectPath}/${variant}`);
-                    return true;
-                } catch {
-                    continue;
+            // Analyze and collect code quality issues
+            const sourceFiles = await this.findSourceFiles(projectPath);
+            for (const file of sourceFiles) {
+                const content = await fs.readFile(file, 'utf-8');
+                const fileIssues = this.detectCodeIssues(content);
+                if (fileIssues.length > 0) {
+                    metrics.issues.push({
+                        file: path.relative(projectPath, file),
+                        issues: fileIssues
+                    });
                 }
             }
-            return false;
+
+            return metrics;
         } catch (error) {
-            logger.warn(`Error checking config file ${filename}: ${error.message}`);
-            return false;
+            logger.error(`Code quality analysis failed: ${error.message}`);
+            throw error;
         }
     }
 
-    async hasPackage(projectPath, packageName, fs) {
-        if (!projectPath || !packageName || !fs) {
-            return false;
-        }
 
+    async hasPackage(projectPath, packageName) {
         try {
-            const packageJsonContent = await fs.readFile(`${projectPath}/package.json`, 'utf-8');
-            const packageJson = JSON.parse(packageJsonContent);
-            
-            return !!(
-                packageJson.dependencies?.[packageName] || 
-                packageJson.devDependencies?.[packageName]
-            );
+            const packageJsonPath = path.join(projectPath, 'package.json');
+            const packageJson = require(packageJsonPath);
+            return !!(packageJson.dependencies?.[packageName] || packageJson.devDependencies?.[packageName]);
         } catch (error) {
             logger.warn(`Error checking package ${packageName}: ${error.message}`);
             return false;
         }
     }
 
-    async calculateMaintainabilityIndex(projectPath, fs) {
-        if (!projectPath || !fs) {
-            return { score: 70, issues: [] };
+    async getProjectContent(projectPath) {
+        let content = '';
+        const sourceFiles = await this.findSourceFiles(projectPath);
+        for (const file of sourceFiles) {
+            content += await fs.readFile(file, 'utf-8') + '\n';
         }
-
-        try {
-            const sourceFiles = await fs.readdir(projectPath);
-            let totalScore = 0;
-            const issues = [];
-
-            for (const file of sourceFiles) {
-                if (!file.endsWith('.js') && !file.endsWith('.ts')) continue;
-
-                try {
-                    const content = await fs.readFile(`${projectPath}/${file}`, 'utf-8');
-                    const fileScore = this.calculateFileMaintenanceScore(content);
-                    totalScore += fileScore;
-
-                    if (fileScore < 70) {
-                        issues.push({
-                            type: 'maintainability',
-                            message: `Low maintainability score (${fileScore.toFixed(2)})`,
-                            file: file,
-                            severity: fileScore < 50 ? 'high' : 'medium'
-                        });
-                    }
-                } catch (error) {
-                    logger.warn(`Error analyzing file ${file}: ${error.message}`);
-                    continue;
-                }
-            }
-
-            const averageScore = sourceFiles.length > 0 
-                ? Math.min(100, totalScore / sourceFiles.length) 
-                : 70;
-
-            return {
-                score: Math.round(averageScore * 100) / 100,
-                issues
-            };
-        } catch (error) {
-            logger.warn(`Maintainability calculation failed: ${error.message}`);
-            return {
-                score: 70,
-                issues: [{
-                    type: 'error',
-                    message: `Maintainability calculation failed: ${error.message}`,
-                    severity: 'medium'
-                }]
-            };
-        }
+        return content;
     }
 
-    calculateFileMaintenanceScore(content) {
-        try {
-            // Calculate base score
-            let score = 70;
-            
-            // Add points for documentation
-            const commentLines = (content.match(/\/\*[\s\S]*?\*\/|\/\/.*/g) || []).length;
-            score += Math.min(10, commentLines * 0.5);
-            
-            // Add points for consistent formatting
-            const indentationPattern = /^[ \t]+/gm;
-            const indentations = content.match(indentationPattern) || [];
-            const consistentIndentation = new Set(indentations).size <= 2;
-            if (consistentIndentation) score += 5;
-            
-            // Deduct points for code smells
-            const codeSmells = [
-                /TODO|FIXME/g,
-                /console\.(log|debug)/g,
-                /debugger/g
-            ];
-            
-            for (const smell of codeSmells) {
-                const matches = content.match(smell) || [];
-                score -= matches.length * 2;
+
+    async calculateMaintenanceScore(content) {
+        const metrics = {
+            lineCount: content.split('\n').length,
+            commentRatio: this.calculateCommentRatio(content),
+            complexity: this.calculateComplexity(content)
+        };
+
+        const score = Math.round(
+            100 - (
+                (metrics.complexity * 0.4) +
+                ((1 - metrics.commentRatio) * 30) +
+                (Math.log(metrics.lineCount) * 2)
+            )
+        );
+
+        return Math.max(0, Math.min(100, score));
+    }
+
+    calculateCommentRatio(content) {
+        const lines = content.split('\n');
+        const commentLines = lines.filter(line =>
+            line.trim().startsWith('//') ||
+            line.trim().startsWith('/*') ||
+            line.trim().startsWith('*')
+        ).length;
+
+        return commentLines / lines.length;
+    }
+
+    calculateComplexity(content) {
+        const complexityFactors = {
+            controlFlow: {
+                patterns: [
+                    /if\s*\(/g,
+                    /else\s+if\s*\(/g,
+                    /for\s*\(/g,
+                    /while\s*\(/g,
+                    /do\s*{/g,
+                    /switch\s*\(/g,
+                    /case\s+[^:]+:/g,
+                    /catch\s*\(/g
+                ],
+                weight: 1
+            },
+            logicalOperators: {
+                patterns: [/&&|\|\|/g],
+                weight: 0.5
+            },
+            ternary: {
+                patterns: [/\?[^:]+:/g],
+                weight: 0.5
+            },
+            functions: {
+                patterns: [
+                    /function\s+\w+\s*\([^)]*\)\s*{/g,
+                    /\w+\s*:\s*function\s*\([^)]*\)\s*{/g,
+                    /=>\s*{/g
+                ],
+                weight: 0.5
             }
-            
-            return Math.max(0, Math.min(100, score));
+        };
+
+        let totalComplexity = 1;
+
+        for (const factor of Object.values(complexityFactors)) {
+            const matchCount = factor.patterns.reduce((count, pattern) => {
+                const matches = content.match(pattern) || [];
+                return count + matches.length;
+            }, 0);
+            totalComplexity += matchCount * factor.weight;
+        }
+
+        return Math.round(totalComplexity * 10) / 10;
+    }
+
+    detectCodeIssues(content) {
+        const issues = [];
+        // Add issue detection logic here...  This is a placeholder.
+        return issues;
+    }
+
+    async findSourceFiles(projectPath) {
+        const sourceFiles = [];
+        try {
+            const walk = async (dir) => {
+                const entries = await fs.readdir(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+                    const fullPath = path.join(dir, entry.name);
+                    if (entry.isDirectory()) await walk(fullPath);
+                    else if (entry.name.endsWith('.js') || entry.name.endsWith('.ts')) sourceFiles.push(fullPath);
+                }
+            };
+            await walk(projectPath);
+            return sourceFiles;
         } catch (error) {
-            logger.warn(`Error calculating maintenance score: ${error.message}`);
-            return 70; // Default score on error
+            logger.warn(`Error finding source files: ${error.message}`);
+            return [];
         }
     }
 
     async analyzeTestCoverage(projectPath, fs) {
         try {
-            const metrics = {
-                hasTestDirectory: false,
-                testFiles: 0,
-                coverageConfig: false,
-                testFrameworks: [],
-                coverageScore: 0
+            const testFiles = await this.findSourceFiles(projectPath, fs);
+            const testMetrics = {
+                totalTests: 0,
+                passedTests: 0,
+                coverage: {
+                    lines: 0,
+                    functions: 0,
+                    branches: 0,
+                    statements: 0
+                }
             };
 
-            // Check for test directories
-            const testDirs = ['__tests__', 'test', 'tests', 'spec'];
-            for (const dir of testDirs) {
-                try {
-                    await fs.access(`${projectPath}/${dir}`);
-                    metrics.hasTestDirectory = true;
-                    break;
-                } catch {
-                    continue;
-                }
-            }
-
-            // Analyze configuration files
-            const configs = ['jest.config.js', '.nycrc', 'karma.conf.js'];
-            for (const config of configs) {
-                try {
-                    await fs.access(`${projectPath}/${config}`);
-                    metrics.coverageConfig = true;
-                    break;
-                } catch {
-                    continue;
-                }
-            }
-
-            // Count test files and analyze content
-            const sourceFiles = await this.findTestFiles(projectPath, fs);
-            metrics.testFiles = sourceFiles.length;
-
-            let totalAssertions = 0;
-            let totalDescribeBlocks = 0;
-
-            for (const file of sourceFiles) {
-                try {
-                    const content = await fs.readFile(file, 'utf-8');
-                    totalAssertions += (content.match(/expect\(|assert\./g) || []).length;
-                    totalDescribeBlocks += (content.match(/describe\(|context\(|suite\(/g) || []).length;
-                } catch (error) {
-                    logger.warn(`Error reading test file ${file}: ${error.message}`);
-                }
-            }
-
-            // Calculate coverage score
-            metrics.coverageScore = this.calculateTestCoverageScore(
-                metrics.hasTestDirectory,
-                metrics.coverageConfig,
-                metrics.testFiles,
-                totalAssertions,
-                totalDescribeBlocks
-            );
-
-            return metrics;
+            // Implementation details would go here
+            return testMetrics;
         } catch (error) {
             logger.warn(`Test coverage analysis failed: ${error.message}`);
-            return {
-                hasTestDirectory: false,
-                testFiles: 0,
-                coverageConfig: false,
-                testFrameworks: [],
-                coverageScore: 0
-            };
+            return null;
         }
-    }
-
-    async findTestFiles(projectPath, fs) {
-        const testFiles = [];
-        const testPatterns = ['.test.', '.spec.', '-test.', '-spec.'];
-        
-        try {
-            const walk = async (dir) => {
-                const entries = await fs.readdir(dir, { withFileTypes: true });
-                
-                for (const entry of entries) {
-                    if (entry.name.startsWith('.') || entry.name === 'node_modules') {
-                        continue;
-                    }
-
-                    const fullPath = `${dir}/${entry.name}`;
-                    
-                    if (entry.isDirectory()) {
-                        await walk(fullPath);
-                    } else if (testPatterns.some(pattern => entry.name.includes(pattern))) {
-                        testFiles.push(fullPath);
-                    }
-                }
-            };
-
-            await walk(projectPath);
-            return testFiles;
-        } catch (error) {
-            logger.warn(`Error finding test files: ${error.message}`);
-            return [];
-        }
-    }
-
-    calculateTestCoverageScore(hasTestDir, hasConfig, numFiles, assertions, describes) {
-        let score = 0;
-        
-        // Base points for test infrastructure
-        if (hasTestDir) score += 20;
-        if (hasConfig) score += 20;
-        
-        // Points for test quantity and quality
-        if (numFiles > 0) {
-            score += Math.min(30, numFiles * 5); // Up to 30 points for number of test files
-            
-            const assertionsPerFile = assertions / numFiles;
-            score += Math.min(20, assertionsPerFile * 2); // Up to 20 points for assertions density
-            
-            const describesPerFile = describes / numFiles;
-            score += Math.min(10, describesPerFile * 2); // Up to 10 points for test organization
-        }
-        
-        return Math.min(100, Math.round(score));
     }
 }
 
