@@ -71,6 +71,10 @@ args = "Template Basic Test"
 task = "workflow.run"
 args = "Remote Template Test"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Test Remote Express App"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -280,6 +284,21 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/generator.git"
+
+[[workflows.workflow]]
+name = "Test Remote Express App"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd test-remote-project && npm install && node app.js"
+waitForPort = 3000
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

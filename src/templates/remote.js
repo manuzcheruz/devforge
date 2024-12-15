@@ -715,19 +715,7 @@ class RemoteTemplateManager {
             '.vscode'
         ];
         
-        // Track project characteristics for better template handling
-        const projectFeatures = {
-            hasTypeScript: false,
-            hasTests: false,
-            hasDocumentation: false,
-            hasBuildConfig: false,
-            hasDocker: false,
-            frameworks: new Set(),
-            buildTools: new Set()
-        };
-        
-        // Include test files if they exist
-        const includeTests = template.variables?.includeTests === 'true';
+        const ejs = require('ejs');
         
         try {
             const readDirRecursive = async (dir, baseDir = '') => {
@@ -745,17 +733,69 @@ class RemoteTemplateManager {
                     if (entry.isDirectory()) {
                         await readDirRecursive(fullPath, relativePath);
                     } else {
-                        // Only include relevant file types
                         const ext = path.extname(entry.name).toLowerCase();
-                        if (['.js', '.ts', '.json', '.md', '.yml', '.yaml', '.env', '.html', '.css'].includes(ext)) {
+                        
+                        // Handle EJS templates specially
+                        if (ext === '.ejs') {
                             const content = await fs.readFile(fullPath, 'utf-8');
-                            files[relativePath] = content;
+                            const targetPath = relativePath.replace('.ejs', '');
+                            
+                            // Process Express.js specific templates
+                            if (entry.name === 'www.ejs') {
+                                files['bin/www'] = ejs.render(content, {
+                                    name: template.name,
+                                    port: template.variables?.port || 3000,
+                                    modules: {},
+                                    localModules: {}
+                                });
+                            } else if (entry.name === 'app.js.ejs') {
+                                files['app.js'] = ejs.render(content, {
+                                    view: template.variables?.view || 'jade',
+                                    css: template.variables?.css || 'css',
+                                    modules: {
+                                        'logger': 'morgan',
+                                        'bodyParser': 'body-parser',
+                                        'path': 'path',
+                                        'cookieParser': 'cookie-parser',
+                                        'debug': 'debug'
+                                    },
+                                    localModules: {
+                                        'indexRouter': './routes/index',
+                                        'usersRouter': './routes/users'
+                                    }
+                                });
+                            } else {
+                                files[targetPath] = ejs.render(content, template.variables || {});
+                            }
+                        } else if (['.js', '.ts', '.json', '.md', '.yml', '.yaml', '.env', '.html', '.css'].includes(ext)) {
+                            const content = await fs.readFile(fullPath, 'utf-8');
+                            
+                            // Special handling for specific Express.js files
+                            if (entry.name === 'gitignore') {
+                                files['.gitignore'] = content;
+                            } else if (relativePath.startsWith('templates/js/routes/')) {
+                                // Move route files to routes directory
+                                files[`routes/${path.basename(relativePath)}`] = content;
+                            } else if (relativePath.startsWith('templates/css/')) {
+                                // Move CSS files to public/stylesheets
+                                files[`public/stylesheets/${path.basename(relativePath)}`] = content;
+                            } else if (relativePath.startsWith('templates/js/')) {
+                                // Process other JS files
+                                files[path.basename(relativePath)] = content;
+                            } else {
+                                files[relativePath] = content;
+                            }
                         }
                     }
                 }
             };
             
             await readDirRecursive(template.path);
+            
+            // Ensure essential Express.js directories exist
+            files['public/javascripts/.gitkeep'] = '';
+            files['public/images/.gitkeep'] = '';
+            files['views/.gitkeep'] = '';
             
             return {
                 ...template,
