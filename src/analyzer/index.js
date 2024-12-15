@@ -5,6 +5,7 @@ const ComplexityAnalyzer = require('./metrics/complexity');
 const PerformanceAnalyzer = require('./metrics/performance');
 const QualityAnalyzer = require('./metrics/quality');
 
+// NodeSmith Project Analyzer
 class ProjectAnalyzer {
     constructor() {
         this.complexityAnalyzer = new ComplexityAnalyzer();
