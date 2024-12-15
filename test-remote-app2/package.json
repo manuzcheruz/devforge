@@ -2,15 +2,22 @@
   "name": "test-remote-app2",
   "version": "1.0.0",
   "description": "A Node.js project created with NodeForge",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "jest --coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"**/*.{js,json,md}\"",
-    "prepare": "husky install"
+    "format": "prettier --write \"**/*.{js,json,md}\""
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "morgan": "^1.10.0",
+    "debug": "^4.3.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   },
   "keywords": [],
   "author": "",

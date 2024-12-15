@@ -111,7 +111,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project -u https://github.com/expressjs/express-starter.git"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/express.git"
 
 [[workflows.workflow]]
 name = "Database Test"

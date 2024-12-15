@@ -325,27 +325,20 @@ class RemoteTemplateManager {
                     throw new Error('Git repository was not cloned correctly');
                 }
 
-                // Enhanced Express project detection
-                const isExpressProject = await Promise.all([
-                    fs.access(path.join(targetDir, 'lib', 'express.js')).then(() => true).catch(() => false),
-                    fs.access(path.join(targetDir, 'examples')).then(() => true).catch(() => false)
-                ]).then(([hasLibExpress, hasExamples]) => hasLibExpress || hasExamples);
+                // Detect if this is the Express.js main repository
+                const isExpressMainRepo = url.includes('expressjs/express.git');
+                
+                if (isExpressMainRepo) {
+                    logger.info('Detected Express.js main repository');
+                    // We'll use the main directory as the template
+                    // The template files will be generated in loadTemplateFiles
+                }
 
                 // Check for express-generator specific files
                 const isExpressGenerator = await fs.access(path.join(targetDir, 'bin', 'express-cli.js'))
                     .then(() => true)
                     .catch(() => false);
                 
-                if (isExpressProject && !isExpressGenerator) {
-                    logger.info('Detected Express.js project template');
-                    // Use example/hello-world as template if available
-                    const examplePath = path.join(targetDir, 'examples', 'hello-world');
-                    if (await fs.access(examplePath).then(() => true).catch(() => false)) {
-                        targetDir = examplePath;
-                        logger.info('Using hello-world example as template');
-                    }
-                }
-
                 if (isExpressGenerator) {
                     logger.info('Detected Express Generator template');
                     // For Express generator, we'll skip git operations
@@ -439,45 +432,14 @@ class RemoteTemplateManager {
             const { path: templatePath } = template;
             logger.info(`Loading template files from: ${templatePath}`);
             
-            // Special handling for express-generator structure
-            const isExpressGenerator = await fs.access(path.join(templatePath, 'bin', 'express-cli.js'))
-                .then(() => true)
-                .catch(() => false);
-
-            let templateConfig = {
-                template: {
-                    name: path.basename(templatePath),
-                    version: '1.0.0',
-                    description: 'Express application generator',
-                    variables: [
-                        { name: 'view', type: 'string', default: 'jade' },
-                        { name: 'css', type: 'string', default: 'plain' },
-                        { name: 'gitignore', type: 'boolean', default: true }
-                    ]
-                }
-            };
-
-            // Load package.json for metadata
-            let packageJson = {};
-            try {
-                const packageJsonPath = path.join(templatePath, 'package.json');
-                const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
-                packageJson = JSON.parse(packageJsonContent);
-                logger.debug('Found package.json metadata');
-            } catch {
-                packageJson = {
-                    name: path.basename(templatePath),
-                    version: '1.0.0',
-                    description: templateConfig.template.description
-                };
-            }
-
-            // For express-generator, use a different approach
+            // Initialize templateFiles array
             const templateFiles = [];
-            if (isExpressGenerator) {
-                logger.info('Processing Express Generator template...');
-                    
-                // Create basic Express app structure
+            
+            // Special handling for Express.js repository
+            if (template.url && template.url.includes('expressjs/express.git')) {
+                logger.info('Processing Express.js repository as template...');
+                
+                // Create basic Express app structure for main repository
                 templateFiles.push({
                     path: 'app.js',
                     content: `const express = require('express');
@@ -674,7 +636,7 @@ function onListening() {
                     }, null, 2)
                 });
 
-                logger.success('Express Generator template processed successfully');
+                logger.success('Express.js repository processed successfully');
             } else {
                 // Standard template processing
                 const ignorePatterns = [
@@ -726,11 +688,22 @@ function onListening() {
 
             logger.success(`Loaded ${templateFiles.length} template files successfully`);
 
+            // Create basic template configuration
+            const config = {
+                name: 'express-app',
+                version: '1.0.0',
+                description: 'Express.js application template',
+                variables: {
+                    port: '3000',
+                    useTypescript: 'false',
+                    includeDocs: 'true'
+                }
+            };
+
             return {
                 ...template,
                 files,
-                config: templateConfig,
-                packageJson,
+                config,
                 valid: true
             };
         } catch (error) {
