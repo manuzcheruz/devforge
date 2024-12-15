@@ -1,7 +1,7 @@
 # test-remote-app2
 
 ## Description
-A Node.js project created with NodeForge
+A Node.js project created with NodeSmith
 
 ## Setup
 1. Install dependencies:

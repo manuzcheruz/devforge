@@ -554,7 +554,7 @@ class RemoteTemplateManager {
                 
                 validationResult.details.configStatus = 'found';
                 if (!config.template) {
-                    warnings.push('nodeforge.json missing template configuration');
+                    warnings.push('nodesmith.json missing template configuration');
                 } else {
                     const requiredConfigFields = ['name', 'version', 'description'];
                     const missingFields = requiredConfigFields.filter(field => !config.template[field]);
@@ -564,7 +564,7 @@ class RemoteTemplateManager {
                 }
             } catch (error) {
                 if (error.code !== 'ENOENT') {
-                    issues.push(`Invalid nodeforge.json: ${error.message}`);
+                    issues.push(`Invalid nodesmith.json: ${error.message}`);
                 }
                 validationResult.details.configStatus = error.code === 'ENOENT' ? 'missing' : 'invalid';
             }
