@@ -117,13 +117,59 @@ class PerformanceAnalyzerPlugin extends BasePlugin {
         try {
             const packageJsonPath = path.join(projectPath, 'package.json');
             const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+            const nodeModulesPath = path.join(projectPath, 'node_modules');
             
-            return Object.entries(packageJson.dependencies || {})
-                .map(([name, version]) => ({ name, version, size: 0 }));
+            const dependencies = await Promise.all(
+                Object.entries(packageJson.dependencies || {})
+                    .map(async ([name, version]) => {
+                        const depPath = path.join(nodeModulesPath, name);
+                        try {
+                            const size = await this.calculateDependencySize(depPath);
+                            return {
+                                name,
+                                version,
+                                size,
+                                sizeFormatted: this.formatBytes(size),
+                                isHeavy: size > 1024 * 1024 // Flag as heavy if > 1MB
+                            };
+                        } catch (err) {
+                            return { name, version, size: 0, sizeFormatted: '0 B', isHeavy: false };
+                        }
+                    })
+            );
+            
+            return dependencies.sort((a, b) => b.size - a.size);
         } catch (error) {
             console.warn('Error analyzing dependencies:', error);
             return [];
         }
+    }
+
+    async calculateDependencySize(depPath) {
+        let totalSize = 0;
+        
+        const calculateSize = async (dirPath) => {
+            try {
+                const entries = await fs.readdir(dirPath, { withFileTypes: true });
+                
+                for (const entry of entries) {
+                    const fullPath = path.join(dirPath, entry.name);
+                    
+                    if (entry.isDirectory()) {
+                        await calculateSize(fullPath);
+                    } else if (entry.isFile()) {
+                        const stats = await fs.stat(fullPath);
+                        totalSize += stats.size;
+                    }
+                }
+            } catch (error) {
+                // Skip if directory or file is not accessible
+                return;
+            }
+        };
+        
+        await calculateSize(depPath);
+        return totalSize;
     }
 
     async analyzeAsyncPatterns(projectPath) {

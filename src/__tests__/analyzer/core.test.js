@@ -18,6 +18,18 @@ describe('Core Analyzer Functionality', () => {
       expect(Array.isArray(analysis.metrics.dependencies.production)).toBe(true);
       expect(Array.isArray(analysis.metrics.dependencies.development)).toBe(true);
     });
+
+    it('should handle missing project directory gracefully', async () => {
+      const nonExistentPath = path.join(__dirname, 'non-existent-project');
+      await expect(analyzeProject(nonExistentPath)).rejects.toThrow();
+    });
+
+    it('should detect source files correctly', async () => {
+      const analysis = await analyzeProject(testProjectPath);
+      const sourceFiles = analysis.metrics.structure.sourceFiles;
+      expect(Array.isArray(sourceFiles)).toBe(true);
+      expect(sourceFiles.some(file => file.endsWith('.js') || file.endsWith('.ts'))).toBe(true);
+    });
   });
 
   describe('Code Quality Analysis', () => {
@@ -26,6 +38,8 @@ describe('Core Analyzer Functionality', () => {
       expect(analysis.metrics.quality).toBeDefined();
       expect(typeof analysis.metrics.quality.maintainabilityIndex).toBe('number');
       expect(Array.isArray(analysis.metrics.quality.issues)).toBe(true);
+      expect(analysis.metrics.quality.maintainabilityIndex).toBeGreaterThanOrEqual(0);
+      expect(analysis.metrics.quality.maintainabilityIndex).toBeLessThanOrEqual(100);
     });
 
     it('should detect code complexity', async () => {
@@ -33,6 +47,23 @@ describe('Core Analyzer Functionality', () => {
       expect(analysis.metrics.complexity).toBeDefined();
       expect(typeof analysis.metrics.complexity.average).toBe('number');
       expect(typeof analysis.metrics.complexity.highest).toBe('number');
+      expect(analysis.metrics.complexity.average).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should identify specific code quality issues', async () => {
+      const analysis = await analyzeProject(testProjectPath);
+      const issues = analysis.metrics.quality.issues;
+      expect(issues.every(issue => issue.type && issue.message)).toBe(true);
+      expect(issues.every(issue => typeof issue.type === 'string')).toBe(true);
+    });
+
+    it('should calculate accurate complexity scores', async () => {
+      const analysis = await analyzeProject(testProjectPath);
+      expect(analysis.metrics.complexity.highest).toBeGreaterThanOrEqual(analysis.metrics.complexity.average);
+      if (analysis.metrics.complexity.files) {
+        expect(Array.isArray(analysis.metrics.complexity.files)).toBe(true);
+        expect(analysis.metrics.complexity.files.every(file => file.path && typeof file.complexity === 'number')).toBe(true);
+      }
     });
   });
 
