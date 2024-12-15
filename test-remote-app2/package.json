@@ -1,7 +1,7 @@
 {
   "name": "test-remote-app2",
   "version": "1.0.0",
-  "description": "A Node.js project created with NodeForge",
+  "description": "A Node.js project created with NodeSmith",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

@@ -7,7 +7,7 @@ const { logger } = require('../../utils/logger');
 class EnvironmentSyncPlugin extends EnvironmentPlugin {
     constructor() {
         super({
-            name: 'core-environment-sync',
+            name: 'nodesmith-environment-sync',
             version: '1.0.0',
             type: 'environment',
             capabilities: {
