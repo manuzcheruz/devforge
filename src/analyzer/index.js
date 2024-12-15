@@ -14,6 +14,16 @@ class ProjectAnalyzer {
             complexity: {},
             customRules: {}
         };
+        
+        // Bind all methods to this instance
+        this.analyzeProject = this.analyzeProject.bind(this);
+        this.analyzeStructure = this.analyzeStructure.bind(this);
+        this.analyzeDependencies = this.analyzeDependencies.bind(this);
+        this.analyzeSecurity = this.analyzeSecurity.bind(this);
+        this.analyzeCodeQuality = this.analyzeCodeQuality.bind(this);
+        this.checkBestPractices = this.checkBestPractices.bind(this);
+        this.analyzePerformance = this.analyzePerformance.bind(this);
+        this.analyzeComplexity = this.analyzeComplexity.bind(this);
     }
 
     async analyzeProject(projectPath) {

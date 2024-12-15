@@ -227,7 +227,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm test"
+args = "jest"
 
 [[workflows.workflow]]
 name = "CLI Help Test"
