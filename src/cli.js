@@ -138,13 +138,39 @@ class CLI {
 
         this.program
             .command('analyze')
-            .description('Analyze project')
+            .description('Analyze project structure and dependencies')
             .argument('[path]', 'Project path', '.')
-            .action(async (path) => {
-                const nodeForge = require('./index');
-                const analysis = await nodeForge.analyzeProject(path);
-                logger.info('Project analysis complete');
-                console.log(analysis);
+            .option('-f, --format <format>', 'Output format (json, text)', 'text')
+            .option('-o, --output <file>', 'Save analysis to file')
+            .action(async (path, options) => {
+                const analyzer = require('./analyzer');
+                try {
+                    const analysis = await analyzer.analyzeProject(path);
+                    
+                    if (options.format === 'json') {
+                        const output = JSON.stringify(analysis, null, 2);
+                        if (options.output) {
+                            await fs.promises.writeFile(options.output, output);
+                            logger.success(`Analysis saved to ${options.output}`);
+                        } else {
+                            console.log(output);
+                        }
+                    } else {
+                        const { formatTextReport } = require('./utils/formatter');
+                        const report = formatTextReport(analysis);
+                        if (options.output) {
+                            await fs.promises.writeFile(options.output, report);
+                            logger.success(`Analysis saved to ${options.output}`);
+                        } else {
+                            console.log(report);
+                        }
+                    }
+                    
+                    logger.success('Project analysis complete');
+                } catch (error) {
+                    logger.error(`Analysis failed: ${error.message}`);
+                    process.exit(1);
+                }
             });
     }
 
