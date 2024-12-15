@@ -283,7 +283,8 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "GITHUB_TOKEN=$GITHUB_TOKEN chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/generator.git"
+args = "rm -rf test-remote-project && GITHUB_TOKEN=$GITHUB_TOKEN chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-project --url https://github.com/expressjs/generator.git && cd test-remote-project && npm install && npm start"
+waitForPort = 3000
 
 [[workflows.workflow]]
 name = "Test Remote Express App"

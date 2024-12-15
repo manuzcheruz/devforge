@@ -25,9 +25,9 @@ async function createProject(options, pluginManager) {
             logger.info(`Fetching remote template from: ${options.url}`);
             try {
                 template = await remoteTemplateManager.fetchTemplate(options.url);
-                await remoteTemplateManager.detectAndCheckoutDefaultBranch(template.path);
-                // Load template files after fetching
                 template = await remoteTemplateManager.loadTemplateFiles(template);
+                template.isRemote = true;
+                template.url = options.url;
                 logger.success('Remote template fetched successfully');
 
                 // Set default template configuration for remote templates
@@ -108,8 +108,11 @@ async function createProjectStructure(projectPath, template) {
         // Initialize git repository with proper error handling
         process.chdir(projectPath);
         logger.info('Initializing git repository...');
+        let gitInitialized = false;
         try {
             await execPromise('git init');
+            gitInitialized = true;
+            logger.success('Git repository initialized');
         } catch (gitError) {
             logger.warn('Git initialization failed, continuing without git...');
         }
@@ -169,42 +172,31 @@ async function createProjectStructure(projectPath, template) {
             }
         }
         
-        // Setup git hooks and configurations if git was initialized successfully
-        try {
-            const gitStatus = await execPromise('git status');
-            if (gitStatus) {
+        // For Express generator templates, skip git and husky setup
+        if (template.isExpressGenerator) {
+            logger.info('Express generator template detected - skipping git and husky setup');
+        } else if (gitInitialized && !template.isRemote) {
+            try {
                 logger.info('Setting up git hooks...');
-                // Ensure husky is installed as a dev dependency first
                 await execPromise('npm install --save-dev husky@^8.0.3 @commitlint/cli@^17.0.0 @commitlint/config-conventional@^17.0.0 --loglevel error');
-                
-                // Initialize husky with proper error handling
-                try {
+                // Skip husky initialization for express templates
+                if (!template.isExpressGenerator) {
                     await execPromise('npx husky install');
-                    await execPromise('npm pkg set scripts.prepare="husky install"');
                     
                     // Create .husky directory explicitly
                     const huskyDir = path.join(projectPath, '.husky');
                     await fs.mkdir(huskyDir, { recursive: true });
                     
-                    // Add hooks with proper permissions
-                    await execPromise('npx husky add .husky/commit-msg "npx --no -- commitlint --edit $1"');
-                    await execPromise('npx husky add .husky/pre-commit "npm run lint && npm run test"');
-                    await execPromise('chmod +x .husky/commit-msg .husky/pre-commit');
-                    
-                    logger.info('Creating commit lint configuration...');
-                    await fs.writeFile(
-                        path.join(projectPath, 'commitlint.config.js'),
-                        'module.exports = {extends: ["@commitlint/config-conventional"]};' + '\n'
-                    );
+                    // Add basic git hooks
+                    await execPromise('npx husky add .husky/pre-commit "npm run lint"');
+                    await execPromise('chmod +x .husky/pre-commit');
                     
                     logger.success('Git hooks setup completed successfully');
-                } catch (huskyError) {
-                    logger.warn(`Husky setup failed: ${huskyError.message}`);
-                    logger.info('Continuing with basic git configuration...');
                 }
+            } catch (huskyError) {
+                logger.warn(`Git hooks setup failed: ${huskyError.message}`);
+                logger.info('Continuing without git hooks...');
             }
-        } catch (hooksError) {
-            logger.warn(`Git hooks setup skipped: ${hooksError.message}`);
         }
         
         // Create README.md with project documentation

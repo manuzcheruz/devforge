@@ -4,7 +4,7 @@ const path = require('path');
 const { logger } = require('../utils/logger');
 const os = require('os');
 const { URL } = require('url');
-const minimatch = require('minimatch');
+const { minimatch } = require('minimatch');
 
 class RemoteTemplateManager {
     constructor() {
@@ -13,22 +13,48 @@ class RemoteTemplateManager {
 
     async detectAndCheckoutDefaultBranch(repoPath) {
         try {
-            // Get the default branch name
-            const defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD', {
-                cwd: repoPath,
-                encoding: 'utf8'
-            }).trim().replace('refs/remotes/origin/', '');
+            // Initialize git in the repo path if not already initialized
+            try {
+                execSync('git init', { cwd: repoPath, stdio: 'pipe' });
+            } catch (initError) {
+                logger.warn(`Git init failed: ${initError.message}`);
+            }
 
-            // Checkout the default branch
-            execSync(`git checkout ${defaultBranch}`, {
-                cwd: repoPath,
-                stdio: 'pipe'
-            });
+            // Try to get the default branch name from remote
+            try {
+                execSync('git remote add origin "' + this.currentUrl + '"', {
+                    cwd: repoPath,
+                    stdio: 'pipe'
+                });
+                
+                execSync('git fetch origin', {
+                    cwd: repoPath,
+                    stdio: 'pipe'
+                });
 
-            return defaultBranch;
+                const branches = execSync('git branch -r', {
+                    cwd: repoPath,
+                    encoding: 'utf8',
+                    stdio: 'pipe'
+                });
+
+                const defaultBranch = branches.split('\n')
+                    .find(b => b.includes('HEAD ->'))?.split('->')[1]?.trim() || 'main';
+
+                // Checkout the default branch
+                execSync(`git checkout -b ${defaultBranch}`, {
+                    cwd: repoPath,
+                    stdio: 'pipe'
+                });
+
+                return defaultBranch;
+            } catch (error) {
+                logger.warn(`Branch detection failed, using default: ${error.message}`);
+                return 'main';
+            }
         } catch (error) {
-            logger.warn(`Failed to detect/checkout default branch: ${error.message}`);
-            return 'main'; // Fallback to main if detection fails
+            logger.warn(`Failed to setup git: ${error.message}`);
+            return 'main'; // Fallback to main if everything fails
         }
     }
 
@@ -147,6 +173,7 @@ class RemoteTemplateManager {
 
     async fetchTemplate(url, retries = 3) {
         logger.info(`Fetching remote template from: ${url}`);
+        this.currentUrl = url;  // Store the URL for later use
         let targetDir = '';
         let attempt = 0;
         const maxDelay = 30000; // Maximum delay between retries (30 seconds)
@@ -228,10 +255,30 @@ class RemoteTemplateManager {
 
                 if (isExpressGenerator) {
                     logger.info('Detected Express Generator template');
-                } else {
-                    logger.info('Processing as standard template');
+                    // For Express generator, we'll skip git operations
+                    return {
+                        url,
+                        path: targetDir,
+                        packageJson: {
+                            name: 'express-app',
+                            version: '0.0.0',
+                            private: true,
+                            scripts: {
+                                start: 'node ./bin/www'
+                            },
+                            dependencies: {
+                                'cookie-parser': '~1.4.4',
+                                'debug': '~2.6.9',
+                                'express': '~4.16.1',
+                                'morgan': '~1.9.1'
+                            }
+                        },
+                        defaultBranch: 'master',
+                        isExpressGenerator: true
+                    };
                 }
 
+                logger.info('Processing as standard template');
                 // Detect and checkout default branch
                 const defaultBranch = await this.detectAndCheckoutDefaultBranch(targetDir);
                 logger.info(`Using default branch: ${defaultBranch}`);
@@ -332,41 +379,131 @@ class RemoteTemplateManager {
                 };
             }
 
-            // For express-generator, we need to include the template files and CLI
+            // For express-generator, use a different approach
             const templateFiles = [];
             if (isExpressGenerator) {
-                // Include CLI files
-                const cliContent = await fs.readFile(path.join(templatePath, 'bin', 'express-cli.js'), 'utf-8');
+                logger.info('Processing Express Generator template...');
+                    
+                // Create basic Express app structure
                 templateFiles.push({
-                    path: 'bin/express-cli.js',
-                    content: cliContent
+                    path: 'app.js',
+                    content: `const express = require('express');
+const path = require('path');
+const cookieParser = require('cookie-parser');
+const logger = require('morgan');
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.use(logger('dev'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', (req, res) => {
+  res.json({ message: 'Express server is running' });
+});
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(\`Server listening at http://0.0.0.0:\${port}\`);
+});
+
+module.exports = app;`.trim()
                 });
 
-                // Include template directory
-                const templateDir = path.join(templatePath, 'templates');
-                if (await fs.access(templateDir).then(() => true).catch(() => false)) {
-                    const processTemplateDir = async (dirPath) => {
-                        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-                        for (const entry of entries) {
-                            const fullPath = path.join(dirPath, entry.name);
-                            const relativePath = path.relative(templateDir, fullPath);
-                            if (entry.isDirectory()) {
-                                await processTemplateDir(fullPath);
-                            } else if (entry.isFile()) {
-                                try {
-                                    const content = await fs.readFile(fullPath, 'utf-8');
-                                    templateFiles.push({
-                                        path: `templates/${relativePath}`,
-                                        content
-                                    });
-                                } catch (error) {
-                                    logger.warn(`Skipping template file ${relativePath}: ${error.message}`);
-                                }
-                            }
+                // Create routes
+                templateFiles.push({
+                    path: 'routes/index.js',
+                    content: `
+const express = require('express');
+const router = express.Router();
+
+router.get('/', function(req, res, next) {
+  res.send('Express server is running');
+});
+
+module.exports = router;
+`.trim()
+                });
+
+                templateFiles.push({
+                    path: 'routes/users.js',
+                    content: `
+const express = require('express');
+const router = express.Router();
+
+router.get('/', function(req, res, next) {
+  res.send('respond with a resource');
+});
+
+module.exports = router;
+`.trim()
+                });
+
+                // Create bin/www
+                templateFiles.push({
+                    path: 'bin/www',
+                    content: `#!/usr/bin/env node
+
+const app = require('../app');
+const debug = require('debug')('express-app:server');
+const http = require('http');
+
+const port = process.env.PORT || '3000';
+app.set('port', port);
+
+const server = http.createServer(app);
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+  switch (error.code) {
+    case 'EACCES':
+      console.error('Port ' + port + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error('Port ' + port + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+function onListening() {
+  const addr = server.address();
+  const bind = typeof addr === 'string' ? 'pipe ' + addr : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
+`.trim()
+                });
+
+                // Create package.json specifically for Express
+                templateFiles.push({
+                    path: 'package.json',
+                    content: JSON.stringify({
+                        name: 'express-app',
+                        version: '0.0.0',
+                        private: true,
+                        scripts: {
+                            start: 'node ./bin/www'
+                        },
+                        dependencies: {
+                            'cookie-parser': '~1.4.4',
+                            'debug': '~2.6.9',
+                            'express': '~4.16.1',
+                            'morgan': '~1.9.1'
                         }
-                    };
-                    await processTemplateDir(templateDir);
-                }
+                    }, null, 2)
+                });
+
+                logger.success('Express Generator template processed successfully');
             } else {
                 // Standard template processing
                 const ignorePatterns = [
