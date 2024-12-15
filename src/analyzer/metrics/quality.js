@@ -230,42 +230,68 @@ class QualityAnalyzer {
         const complexityFactors = {
             controlFlow: {
                 patterns: [
-                    /if\s*\(/g,
-                    /else\s+if\s*\(/g,
-                    /for\s*\(/g,
-                    /while\s*\(/g,
-                    /do\s*{/g,
-                    /switch\s*\(/g,
-                    /case\s+[^:]+:/g,
-                    /catch\s*\(/g,
-                    /try\s*{/g
+                    /if\s*\([^)]*\)/g,           // if statements with conditions
+                    /else\s+if\s*\([^)]*\)/g,    // else if statements
+                    /for\s*\([^)]*\)/g,          // for loops
+                    /while\s*\([^)]*\)/g,        // while loops
+                    /do\s*{/g,                   // do-while loops
+                    /switch\s*\([^)]*\)/g,       // switch statements
+                    /case\s+[^:]+:/g,            // case statements
+                    /catch\s*\([^)]*\)/g,        // catch blocks
+                    /try\s*{/g,                  // try blocks
+                    /throw\s+new/g               // throw statements
                 ],
-                weight: 1
+                weight: 2.0  // Highest weight for control flow
             },
             logicalOperators: {
-                patterns: [/&&|\|\|/g],
-                weight: 0.5
+                patterns: [
+                    /&&|\|\|/g,                  // Logical AND/OR
+                    /\?\?/g,                     // Nullish coalescing
+                    /\?\./g                      // Optional chaining
+                ],
+                weight: 1.0
             },
             ternary: {
-                patterns: [/\?[^:]+:/g],
-                weight: 0.5
+                patterns: [/\?[^:]+:/g],         // Ternary operations
+                weight: 0.75
             },
             functions: {
                 patterns: [
-                    /function\s+\w+\s*\([^)]*\)\s*{/g,
-                    /\w+\s*:\s*function\s*\([^)]*\)\s*{/g,
-                    /=>\s*{/g,
-                    /class\s+\w+/g
+                    /function\s+\w+\s*\([^)]*\)\s*{/g,  // Named functions
+                    /\w+\s*:\s*function\s*\([^)]*\)\s*{/g, // Object methods
+                    /=>\s*{/g,                           // Arrow functions
+                    /class\s+\w+/g,                      // Class declarations
+                    /constructor\s*\([^)]*\)/g,          // Class constructors
+                    /get\s+\w+\s*\(\)/g,                 // Getters
+                    /set\s+\w+\s*\([^)]*\)/g            // Setters
                 ],
-                weight: 0.5
+                weight: 1.5
             },
             nesting: {
-                patterns: [/{[^}]*{/g],  // Detect nested blocks
-                weight: 0.3
+                patterns: [
+                    /{[^}]*{/g,                  // Nested blocks
+                    /\([^)]*\([^)]*\)/g          // Nested parentheses
+                ],
+                weight: 1.0
             },
-            callbacks: {
-                patterns: [/callback|cb|done|next|then/g],
-                weight: 0.2
+            asyncPatterns: {
+                patterns: [
+                    /async\s+function/g,         // Async functions
+                    /await\s+/g,                 // Await expressions
+                    /\.then\s*\(/g,              // Promise chains
+                    /\.catch\s*\(/g,             // Error handling
+                    /Promise\.(all|race|any)\(/g, // Promise combinators
+                    /new\s+Promise\s*\(/g        // Promise constructor
+                ],
+                weight: 1.25
+            },
+            errorHandling: {
+                patterns: [
+                    /try\s*{[^}]*}\s*catch/g,    // Complete try-catch blocks
+                    /\.catch\s*\([^)]*\)/g,      // Promise catch handlers
+                    /process\.on\s*\(['"](error|uncaughtException)['"]/g // Process error handlers
+                ],
+                weight: 1.0
             }
         };
 
@@ -438,6 +464,42 @@ class QualityAnalyzer {
         }
     }
 
+    async findTestFiles(projectPath, testPatterns, fs) {
+        if (!fs) {
+            throw new Error('FileSystem (fs) parameter is required');
+        }
+        
+        const testFiles = new Set();
+        const ignoredDirs = new Set(['node_modules', 'coverage', 'dist', 'build']);
+        
+        try {
+            const walk = async (dir) => {
+                const entries = await fs.readdir(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.name.startsWith('.') || ignoredDirs.has(entry.name)) continue;
+                    
+                    const fullPath = path.join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        await walk(fullPath);
+                    } else if (entry.isFile()) {
+                        // Check if file matches test patterns
+                        const isTestFile = entry.name.match(/\.(test|spec)\.[jt]sx?$/) ||
+                                         fullPath.includes('__tests__') ||
+                                         fullPath.includes('test');
+                        if (isTestFile) {
+                            testFiles.add(fullPath);
+                        }
+                    }
+                }
+            };
+            
+            await walk(projectPath);
+            return Array.from(testFiles);
+        } catch (error) {
+            logger.warn(`Error finding test files: ${error.message}`);
+            return [];
+        }
+    }
     generateRecommendations(metrics) {
         const recommendations = [];
         
@@ -515,7 +577,9 @@ class QualityAnalyzer {
         try {
             const testPatterns = [
                 '**/__tests__/**/*.[jt]s?(x)',
-                '**/?(*.)+(spec|test).[jt]s?(x)'
+                '**/?(*.)+(spec|test).[jt]s?(x)',
+                '**/test/**/*.[jt]s?(x)',
+                '**/tests/**/*.[jt]s?(x)'
             ];
 
             const testFiles = await this.findTestFiles(projectPath, testPatterns, fs);
@@ -529,15 +593,33 @@ class QualityAnalyzer {
                     lines: 0,
                     functions: 0,
                     branches: 0,
-                    statements: 0
+                    statements: 0,
+                    classes: 0,
+                    methods: 0
                 },
                 files: [],
                 testSuites: {
                     total: 0,
                     passed: 0,
+                    failed: 0,
+                    skipped: 0,
+                    duration: 0
+                },
+                uncoveredFiles: [],
+                testTypes: {
+                    unit: 0,
+                    integration: 0,
+                    e2e: 0
+                },
+                assertions: {
+                    total: 0,
+                    passed: 0,
                     failed: 0
                 },
-                uncoveredFiles: []
+                mockCoverage: {
+                    total: 0,
+                    used: 0
+                }
             };
 
             // Track covered files to identify uncovered ones

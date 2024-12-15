@@ -80,14 +80,30 @@ class ComplexityAnalyzer {
 
     async analyzeComplexity(sourceFiles = [], fs) {
         try {
+            if (!Array.isArray(sourceFiles)) {
+                throw new Error('sourceFiles must be an array');
+            }
+
             let totalComplexity = 0;
             let highestComplexity = 0;
             const complexityData = [];
+            let validFileCount = 0;
 
             for (const file of sourceFiles) {
                 try {
                     const content = await fs.readFile(file, 'utf-8');
-                    const complexity = this.calculateComplexity(content);
+                    if (!content || typeof content !== 'string') {
+                        logger.warn(`Invalid content for file ${file}`);
+                        continue;
+                    }
+
+                    const complexityResult = this.calculateComplexity(content);
+                    if (!complexityResult || typeof complexityResult.score !== 'number') {
+                        logger.warn(`Invalid complexity result for file ${file}`);
+                        continue;
+                    }
+
+                    const complexity = Math.max(1, Math.min(100, complexityResult.score));
                     const functionMetrics = this.analyzeFunctionMetrics(content);
                     const moduleMetrics = this.analyzeModuleMetrics(content);
                     const organization = this.analyzeCodeOrganization(content);
@@ -95,29 +111,30 @@ class ComplexityAnalyzer {
                     const fileMetrics = {
                         path: file,
                         complexity,
-                        functionMetrics,
-                        moduleMetrics,
-                        organization,
-                        details: this.getComplexityDetails(content)
+                        functionMetrics: functionMetrics || this.defaultMetrics.functionMetrics,
+                        moduleMetrics: moduleMetrics || this.defaultMetrics.codeOrganization.moduleMetrics,
+                        organization: organization || this.defaultMetrics.codeOrganization,
+                        details: complexityResult.details || {}
                     };
 
                     complexityData.push(fileMetrics);
                     totalComplexity += complexity;
                     highestComplexity = Math.max(highestComplexity, complexity);
+                    validFileCount++;
                 } catch (fileError) {
                     logger.warn(`Failed to analyze file ${file}: ${fileError.message}`);
                     continue;
                 }
             }
 
-            const averageComplexity = sourceFiles.length > 0
-                ? Math.round((totalComplexity / sourceFiles.length) * 100) / 100
+            const averageComplexity = validFileCount > 0
+                ? Math.round((totalComplexity / validFileCount) * 100) / 100
                 : 0;
 
             return {
                 cyclomaticComplexity: {
-                    average: averageComplexity,
-                    highest: Math.round(highestComplexity * 100) / 100,
+                    average: Math.max(0, Math.min(100, averageComplexity)),
+                    highest: Math.max(0, Math.min(100, Math.round(highestComplexity * 100) / 100)),
                     files: complexityData
                 }
             };
@@ -129,8 +146,10 @@ class ComplexityAnalyzer {
 
     calculateComplexity(content) {
         if (!content || typeof content !== 'string') {
+            logger.warn('Invalid input: content must be a non-empty string');
             return {
                 score: 1,
+                maintainabilityIndex: 100,
                 details: {
                     error: 'Invalid or empty content'
                 }
@@ -138,53 +157,102 @@ class ComplexityAnalyzer {
         }
 
         try {
-            let totalComplexity = 1; // Base complexity
-            const details = {};
+            // Initialize base metrics structure
+            const metrics = {
+                base: 1,
+                patterns: 0,
+                organization: 0,
+                functions: 0,
+                modules: 0
+            };
 
-            // Calculate complexity from control flow and patterns
+            const details = {};
+            let totalWeight = 0;
+
+            // Calculate pattern-based complexity with weighted normalization
             for (const [key, factor] of Object.entries(this.complexityFactors)) {
-                const matchCount = this.countPatternMatches(content, factor.patterns);
-                const factorComplexity = matchCount * factor.weight;
-                totalComplexity += factorComplexity;
-                details[key] = {
-                    count: matchCount,
-                    weight: factor.weight,
-                    contribution: factorComplexity
-                };
+                const matchCount = Math.max(0, this.countPatternMatches(content, factor.patterns));
+                const weight = Number(factor.weight) || 0;
+                totalWeight += weight;
+                
+                // Calculate contribution with bounds checking
+                let contribution = 0;
+                if (matchCount > 0 && weight > 0) {
+                    contribution = Math.min(10, matchCount) * weight;
+                }
+                
+                if (isFinite(contribution)) {
+                    metrics.patterns += contribution;
+                    details[key] = {
+                        count: matchCount,
+                        weight: weight,
+                        contribution: contribution,
+                        normalized: Math.min(100, (contribution / weight) * 10)
+                    };
+                }
             }
 
-            // Analyze code organization metrics
+            // Normalize pattern-based complexity
+            if (totalWeight > 0) {
+                metrics.patterns = Math.min(50, (metrics.patterns / totalWeight) * 10);
+            }
+
+            // Calculate organizational complexity
             const organization = this.analyzeCodeOrganization(content);
             details.organization = organization;
-            totalComplexity += organization.complexity;
+            if (organization && typeof organization.complexity === 'number') {
+                metrics.organization = Math.min(20, Math.max(0, organization.complexity));
+            }
 
-            // Analyze function metrics
+            // Calculate function-based complexity
             const functionMetrics = this.analyzeFunctionMetrics(content);
             details.functions = functionMetrics;
-            totalComplexity += Math.min(2, functionMetrics.averageParameters * 0.2);
-            totalComplexity += Math.min(3, (functionMetrics.totalFunctions > 20 ? 3 : functionMetrics.totalFunctions * 0.15));
+            if (functionMetrics && typeof functionMetrics.totalFunctions === 'number') {
+                // Parameter complexity (max 10)
+                const paramComplexity = Math.min(10, 
+                    ((functionMetrics.averageParameters || 0) * 2)
+                );
+                
+                // Function count complexity (max 10)
+                const funcCountComplexity = Math.min(10,
+                    functionMetrics.totalFunctions > 20 ? 10 : 
+                    ((functionMetrics.totalFunctions || 0) * 0.5)
+                );
+                
+                metrics.functions = Math.min(20, paramComplexity + funcCountComplexity);
+            }
 
-            // Analyze module metrics
+            // Calculate module-based complexity
             const moduleMetrics = this.analyzeModuleMetrics(content);
             details.modules = moduleMetrics;
-            totalComplexity += moduleMetrics.moduleComplexity;
+            if (moduleMetrics && typeof moduleMetrics.moduleComplexity === 'number') {
+                metrics.modules = Math.min(10, moduleMetrics.moduleComplexity);
+            }
+
+            // Calculate final complexity score
+            let totalComplexity = Object.values(metrics).reduce((sum, value) => {
+                return sum + (isFinite(value) ? value : 0);
+            }, 0);
+
+            // Ensure minimum complexity of 1 and maximum of 100
+            totalComplexity = Math.max(1, Math.min(100, totalComplexity));
 
             // Calculate maintainability index
             const maintainabilityIndex = this.calculateMaintainabilityIndex(
                 totalComplexity,
-                organization.nestedDepth,
-                functionMetrics
+                Math.max(0, organization?.nestedDepth || 0),
+                functionMetrics || this.defaultMetrics.functionMetrics
             );
 
-            // Normalize complexity score
-            const normalizedComplexity = Math.max(1, Math.min(100, Math.round(totalComplexity * 10) / 10));
-
             return {
-                score: normalizedComplexity,
-                maintainabilityIndex,
+                score: Math.round(totalComplexity * 10) / 10,
+                maintainabilityIndex: Math.round(maintainabilityIndex * 10) / 10,
                 details: {
+                    metrics,
                     ...details,
-                    totalComplexity: normalizedComplexity,
+                    totalComplexity,
+                    normalizedScore: totalComplexity,
+                    maintainabilityIndex,
                     factors: Object.keys(this.complexityFactors).map(key => ({
                         name: key,
                         ...details[key]
@@ -192,9 +260,10 @@ class ComplexityAnalyzer {
                 }
             };
         } catch (error) {
-            logger.warn(`Complexity calculation failed: ${error.message}`);
+            logger.error(`Complexity calculation failed: ${error.message}`);
             return {
                 score: 1,
+                maintainabilityIndex: 100,
                 details: {
                     error: error.message
                 }
@@ -263,7 +332,6 @@ class ComplexityAnalyzer {
             return count + matches.length;
         }, 0);
     }
-
 
     analyzeFunctionMetrics(content) {
         try {
@@ -385,7 +453,5 @@ class ComplexityAnalyzer {
         }
     }
 }
-
-module.exports = ComplexityAnalyzer;
 
 module.exports = ComplexityAnalyzer;
