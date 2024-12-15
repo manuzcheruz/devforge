@@ -9,8 +9,8 @@ const crypto = require('crypto');
 
 class RemoteTemplateManager {
     constructor() {
-        this.tempDir = path.join(os.tmpdir(), '.nodesmith-templates');
-        this.cacheDir = path.join(os.homedir(), '.nodesmith', 'template-cache');
+        this.tempDir = path.join(os.tmpdir(), '.nodeforge-templates');
+        this.cacheDir = path.join(os.homedir(), '.nodeforge', 'template-cache');
         this.cacheMetadataFile = path.join(this.cacheDir, 'metadata.json');
         this.currentUrl = null;
         this.init();

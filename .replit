@@ -67,6 +67,10 @@ args = "Remote Template Test"
 task = "workflow.run"
 args = "CLI Help Test Updated"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Project Analysis Test"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -177,7 +181,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "NODE_ENV=test jest src/__tests__/analyzer/core.test.js --verbose"
+args = "NODE_ENV=test jest --verbose"
 
 [[workflows.workflow]]
 name = "CLI Help Test"
@@ -261,7 +265,21 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "chmod +x bin/nodesmith.js && ./bin/nodesmith.js --help"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js --help"
+
+[[workflows.workflow]]
+name = "Project Analysis Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js analyze"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]

@@ -16,7 +16,14 @@ class ProjectAnalyzer {
             dependencies: {},
             quality: {
                 issues: [],
-                linting: {}
+                linting: {},
+                documentation: {
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                }
             },
             security: {},
             complexity: {
@@ -127,13 +134,22 @@ class ProjectAnalyzer {
         };
 
         // Check documentation metrics
-        const documentation = metrics?.quality?.documentation || {
-            hasReadme: false,
-            hasApiDocs: false,
-            readmeQuality: 0,
-            coverage: 0,
-            issues: []
-        };
+        const documentation = (metrics?.quality?.documentation) ? {
+                ...{
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                },
+                ...metrics.quality.documentation
+            } : {
+                hasReadme: false,
+                hasApiDocs: false,
+                readmeQuality: 0,
+                coverage: 0,
+                issues: []
+            };
         
         if (!documentation.hasReadme) {
             recommendations.documentation.push({
@@ -292,7 +308,14 @@ class ProjectAnalyzer {
 
             return {
                 ...qualityMetrics,
-                testCoverage
+                testCoverage,
+                documentation: {
+                    hasReadme: await fs.access(path.join(projectPath, 'README.md')).then(() => true).catch(() => false),
+                    hasApiDocs: await fs.access(path.join(projectPath, 'docs/api')).then(() => true).catch(() => false),
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                }
             };
         } catch (error) {
             logger.error(`Code quality analysis failed: ${error.message}`);

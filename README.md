@@ -1,7 +1,7 @@
-# NodeSmith
+# NodeForge
 
 ## Description
-NodeSmith is a comprehensive Node.js development workflow automation tool that standardizes project setup and configuration through template-based project generation.
+NodeForge is a comprehensive Node.js development workflow automation tool that standardizes project setup and configuration through template-based project generation.
 
 ## Features
 - Template-based project generation
