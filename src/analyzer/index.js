@@ -80,45 +80,22 @@ class ProjectAnalyzer {
     }
 
     async analyzeProject(projectPath) {
-        if (!projectPath) {
-            throw new Error('Project path is required');
-        }
-
+        const logger = require('../utils/logger').logger;
+        
         try {
-            // Reset metrics
-            this.metrics = {
-                structure: {},
-                dependencies: {},
-                quality: {},
-                complexity: {},
-                performance: {},
-                security: {}
-            };
-
-            // Check if project path exists and is accessible
-            const exists = await this.fileExists(projectPath);
-            if (!exists) {
-                throw new Error(`Project path does not exist: ${projectPath}`);
+            if (!projectPath) {
+                throw new Error('Project path is required');
             }
 
-            // Verify project structure
-            const isValidProject = await this.validateProjectStructure(projectPath);
-            if (!isValidProject.valid) {
-                throw new Error(`Invalid project structure: ${isValidProject.reason}`);
-            }
+            // Reset and initialize metrics
+            this.metrics = this.initializeMetrics();
+            await this.validateProject(projectPath);
 
             logger.info('Starting project analysis...');
             const startTime = Date.now();
 
-            // Run all analysis in parallel for better performance
-            const [
-                structure,
-                dependencies,
-                quality,
-                complexity,
-                performance,
-                security
-            ] = await Promise.allSettled([
+            // Analyze project components
+            const results = await Promise.all([
                 this.analyzeStructure(projectPath),
                 this.analyzeDependencies(projectPath),
                 this.analyzeCodeQuality(projectPath),
@@ -127,28 +104,29 @@ class ProjectAnalyzer {
                 this.analyzeSecurityMetrics(projectPath)
             ]);
 
-            // Process results and handle errors
+            // Map results to metrics structure
             const metrics = {
-                structure: this.processAnalysisResult(structure, 'structure'),
-                dependencies: this.processAnalysisResult(dependencies, 'dependencies'),
-                quality: this.processAnalysisResult(quality, 'quality'),
-                complexity: this.processAnalysisResult(complexity, 'complexity'),
-                performance: this.processAnalysisResult(performance, 'performance'),
-                security: this.processAnalysisResult(security, 'security')
+                structure: results[0],
+                dependencies: results[1],
+                quality: results[2],
+                complexity: results[3],
+                performance: results[4],
+                security: results[5]
             };
 
-            // Store results in metrics
-            this.metrics = metrics;
-
-            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-            logger.success(`Project analysis completed in ${duration}s`);
-
-            return {
+            // Calculate final scores and generate report
+            const analysis = {
                 metrics,
+                score: this.calculateProjectScore(metrics),
                 timestamp: new Date().toISOString(),
-                duration: `${duration}s`,
-                status: 'success'
+                duration: `${((Date.now() - startTime) / 1000).toFixed(2)}s`,
+                status: 'success',
+                recommendations: await this.generateDetailedRecommendations(metrics)
             };
+
+            logger.success(`Project analysis completed in ${analysis.duration}`);
+            return analysis;
+
         } catch (error) {
             logger.error(`Project analysis failed: ${error.message}`);
             return {
@@ -158,6 +136,121 @@ class ProjectAnalyzer {
                 error: error.message
             };
         }
+    }
+
+    initializeMetrics() {
+        return {
+            structure: {},
+            dependencies: {},
+            quality: {},
+            complexity: {},
+            performance: {},
+            security: {}
+        };
+    }
+
+    async validateProject(projectPath) {
+        // Check if project path exists and is accessible
+        const exists = await this.fileExists(projectPath);
+        if (!exists) {
+            throw new Error(`Project path does not exist: ${projectPath}`);
+        }
+
+        // Verify project structure
+        const isValidProject = await this.validateProjectStructure(projectPath);
+        if (!isValidProject.valid) {
+            throw new Error(`Invalid project structure: ${isValidProject.reason}`);
+        }
+    }
+
+    async runAnalysisTasks(projectPath) {
+        // Run all analysis in parallel for better performance
+        const tasks = [
+            { name: 'structure', task: () => this.analyzeStructure(projectPath) },
+            { name: 'dependencies', task: () => this.analyzeDependencies(projectPath) },
+            { name: 'quality', task: () => this.analyzeCodeQuality(projectPath) },
+            { name: 'complexity', task: () => this.analyzeComplexity(projectPath) },
+            { name: 'performance', task: () => this.analyzePerformance(projectPath) },
+            { name: 'security', task: () => this.analyzeSecurityMetrics(projectPath) }
+        ];
+
+        const results = await Promise.allSettled(tasks.map(t => t.task()));
+        return tasks.reduce((acc, task, index) => {
+            acc[task.name] = results[index];
+            return acc;
+        }, {});
+    }
+
+    aggregateResults(results) {
+        return Object.entries(results).reduce((metrics, [key, result]) => {
+            metrics[key] = this.processAnalysisResult(result, key);
+            return metrics;
+        }, {});
+    }
+
+    calculateProjectScore(metrics) {
+        const weights = {
+            quality: 0.3,
+            complexity: 0.2,
+            security: 0.2,
+            performance: 0.15,
+            dependencies: 0.1,
+            structure: 0.05
+        };
+
+        let totalScore = 0;
+        let totalWeight = 0;
+
+        for (const [metric, weight] of Object.entries(weights)) {
+            if (metrics[metric] && typeof metrics[metric].score === 'number') {
+                totalScore += metrics[metric].score * weight;
+                totalWeight += weight;
+            }
+        }
+
+        return totalWeight > 0 ? Math.round(totalScore / totalWeight) : 0;
+    }
+
+    generateRecommendations(metrics) {
+        const recommendations = [];
+
+        // Quality recommendations
+        if (metrics.quality && metrics.quality.maintainabilityIndex < 70) {
+            recommendations.push({
+                category: 'quality',
+                severity: 'high',
+                message: 'Code maintainability needs improvement',
+                details: 'Consider refactoring complex functions and improving documentation'
+            });
+        }
+
+        // Security recommendations
+        if (metrics.security && !metrics.security.hasPackageLock) {
+            recommendations.push({
+                category: 'security',
+                severity: 'medium',
+                message: 'Missing package-lock.json',
+                details: 'Add package lock file to ensure dependency consistency'
+            });
+        }
+
+        // Performance recommendations
+        if (metrics.performance && metrics.performance.bundleSize > 1024 * 1024) {
+            recommendations.push({
+                category: 'performance',
+                severity: 'medium',
+                message: 'Large bundle size detected',
+                details: 'Consider implementing code splitting and lazy loading'
+            });
+        }
+
+        return recommendations.sort((a, b) => 
+            this.getSeverityWeight(b.severity) - this.getSeverityWeight(a.severity)
+        );
+    }
+
+    getSeverityWeight(severity) {
+        return { high: 3, medium: 2, low: 1 }[severity] || 0;
     }
 
     async validateProjectStructure(projectPath) {
@@ -417,84 +510,268 @@ class ProjectAnalyzer {
     }
 
     async analyzeComplexity(projectPath) {
+        const logger = require('../utils/logger').logger;
         try {
             const sourceFiles = await this.findSourceFiles(projectPath);
-            let totalComplexity = 0;
-            let highestComplexity = 0;
-            
-            for (const file of sourceFiles) {
-                const content = await fs.readFile(file, 'utf-8');
-                const complexity = this.calculateComplexity(content);
-                totalComplexity += complexity;
-                highestComplexity = Math.max(highestComplexity, complexity);
+            const complexityMetrics = await Promise.all(sourceFiles.map(async (file) => {
+                try {
+                    const content = await fs.readFile(file, 'utf-8');
+                    const metrics = this.calculateComplexityMetrics(content);
+                    return {
+                        file: path.relative(projectPath, file),
+                        ...metrics,
+                        severity: this.determineComplexitySeverity(metrics.total)
+                    };
+                } catch (error) {
+                    logger.warn(`Failed to analyze complexity for ${file}: ${error.message}`);
+                    return null;
+                }
+            }));
+
+            // Filter out failed analyses and calculate aggregates
+            const validMetrics = complexityMetrics.filter(m => m !== null);
+            const totalFiles = validMetrics.length;
+
+            if (totalFiles === 0) {
+                return {
+                    average: 0,
+                    highest: 0,
+                    metrics: [],
+                    score: 100
+                };
             }
-            
+
+            const aggregates = validMetrics.reduce((acc, curr) => ({
+                totalComplexity: acc.totalComplexity + curr.total,
+                highest: Math.max(acc.highest, curr.total),
+                functionCount: acc.functionCount + curr.functions,
+                classCount: acc.classCount + curr.classes,
+                nestingCount: acc.nestingCount + curr.nesting
+            }), { totalComplexity: 0, highest: 0, functionCount: 0, classCount: 0, nestingCount: 0 });
+
             return {
-                average: sourceFiles.length > 0 ? totalComplexity / sourceFiles.length : 0,
-                highest: highestComplexity
+                average: aggregates.totalComplexity / totalFiles,
+                highest: aggregates.highest,
+                metrics: validMetrics,
+                score: this.calculateComplexityScore({
+                    average: aggregates.totalComplexity / totalFiles,
+                    highest: aggregates.highest,
+                    functionCount: aggregates.functionCount,
+                    classCount: aggregates.classCount,
+                    nestingCount: aggregates.nestingCount,
+                    fileCount: totalFiles
+                })
             };
         } catch (error) {
             logger.error(`Complexity analysis failed: ${error.message}`);
-            return { average: 0, highest: 0 };
+            return {
+                average: 0,
+                highest: 0,
+                metrics: [],
+                score: 0,
+                error: error.message
+            };
         }
     }
 
+calculateComplexityMetrics(content) {
+        return {
+            total: this.calculateComplexity(content),
+            functions: this.calculateFunctionComplexity(content),
+            classes: this.calculateClassComplexity(content),
+            nesting: this.calculateNestingComplexity(content),
+            controlFlow: this.calculateControlFlowComplexity(content)
+        };
+    }
+
+determineComplexitySeverity(complexity) {
+        if (complexity > 20) return 'high';
+        if (complexity > 10) return 'medium';
+        return 'low';
+    }
+
+calculateComplexityScore({ average, highest, functionCount, classCount, nestingCount, fileCount }) {
+        let score = 100;
+        
+        // Penalize high average complexity
+        if (average > 15) score -= 30;
+        else if (average > 10) score -= 20;
+        else if (average > 5) score -= 10;
+        
+        // Penalize extremely high complexity in any file
+        if (highest > 30) score -= 20;
+        else if (highest > 20) score -= 10;
+        
+        // Penalize high nesting levels
+        const avgNesting = nestingCount / fileCount;
+        if (avgNesting > 5) score -= 20;
+        else if (avgNesting > 3) score -= 10;
+        
+        // Penalize high function/class density
+        const density = (functionCount + classCount) / fileCount;
+        if (density > 10) score -= 20;
+        else if (density > 5) score -= 10;
+        
+        return Math.max(0, Math.min(100, score));
+    }
+
     calculateComplexity(content) {
+        const logger = require('../utils/logger').logger;
+        
+        if (!content || typeof content !== 'string') {
+            logger.warn('Invalid content provided for complexity calculation');
+            return 1;
+        }
+
         try {
-            let complexity = 1; // Base complexity
-            const metrics = {
-                controlFlow: 0,
-                nesting: 0,
-                functionComplexity: 0
+            // Calculate individual complexity metrics with weights
+            const weights = {
+                controlFlow: 1.0,  // Base weight for control flow
+                nesting: 2.0,      // Higher weight for nesting (most important)
+                functions: 1.5,    // Medium weight for function complexity
+                classes: 1.0       // Base weight for class complexity
             };
 
-            // Control flow complexity
-            const controlFlowKeywords = [
-                'if', 'else', 'for', 'while', 'do', 'switch', 'case', 
-                'catch', '&&', '||', '?', 'return', 'break', 'continue'
-            ];
+            const metrics = {
+                controlFlow: this.calculateControlFlowComplexity(content) * weights.controlFlow,
+                nesting: this.calculateNestingComplexity(content) * weights.nesting,
+                functions: this.calculateFunctionComplexity(content) * weights.functions,
+                classes: this.calculateClassComplexity(content) * weights.classes
+            };
+
+            // Calculate total complexity
+            const totalComplexity = Object.values(metrics).reduce((sum, value) => sum + value, 1);
             
-            for (const keyword of controlFlowKeywords) {
-                const matches = content.match(new RegExp(`\\b${keyword}\\b`, 'g'));
-                if (matches) {
-                    metrics.controlFlow += matches.length;
-                    complexity += matches.length;
-                }
+            // Normalize to 1-100 scale using logarithmic scaling
+            // This provides better distribution of scores
+            const normalizedComplexity = Math.min(100, Math.max(1, Math.round(
+                20 * Math.log2(1 + totalComplexity)
+            )));
+
+            logger.debug(`Complexity calculation results: ${JSON.stringify({
+                raw: metrics,
+                normalized: normalizedComplexity
+            })}`);
+
+            return normalizedComplexity;
+        } catch (error) {
+            logger.error(`Error in complexity calculation: ${error.message}`);
+            return 1; // Return base complexity on error
+        }
+    }
+
+    calculateControlFlowComplexity(content) {
+        if (!content || typeof content !== 'string') {
+            return 0;
+        }
+
+        const logger = require('../utils/logger').logger;
+        const controlFlowPatterns = {
+            conditions: {
+                pattern: /\b(if|else\s+if|switch)\s*\([^)]*\)/g,
+                weight: 1
+            },
+            loops: {
+                pattern: /\b(for|while|do)\s*\([^)]*\)/g,
+                weight: 2
+            },
+            tryCatch: {
+                pattern: /\b(try|catch|finally)\s*\{/g,
+                weight: 1
+            },
+            ternary: {
+                pattern: /\?[^:]+:/g,
+                weight: 0.5
+            },
+            logicalOperators: {
+                pattern: /(?:&&|\|\|)(?!\|)(?!&)/g,
+                weight: 0.3
+            }
+        };
+
+        try {
+            let complexity = 0;
+            // Remove comments and strings to avoid false positives
+            const cleanContent = content
+                .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
+                .replace(/\/\/.*/g, '')           // Remove single-line comments
+                .replace(/'([^'\\]|\\.)*'/g, '')  // Remove single-quoted strings
+                .replace(/"([^"\\]|\\.)*"/g, '')  // Remove double-quoted strings
+                .replace(/`([^`\\]|\\.)*`/g, ''); // Remove template literals
+
+            for (const [type, { pattern, weight }] of Object.entries(controlFlowPatterns)) {
+                const matches = cleanContent.match(pattern) || [];
+                complexity += matches.length * weight;
             }
 
-            // Nesting complexity
+            logger.debug(`Control flow complexity: ${complexity}`);
+            return complexity;
+        } catch (error) {
+            logger.warn(`Error in control flow analysis: ${error.message}`);
+            return 0;
+        }
+    }
+
+    calculateNestingComplexity(content) {
+        try {
             const lines = content.split('\n');
             let currentNesting = 0;
             let maxNesting = 0;
-            
+
             for (const line of lines) {
-                const openBraces = (line.match(/{/g) || []).length;
-                const closeBraces = (line.match(/}/g) || []).length;
+                // Count braces considering escaped characters and string contents
+                const openBraces = (line.match(/(?<!\\)\{/g) || []).length;
+                const closeBraces = (line.match(/(?<!\\)\}/g) || []).length;
                 
                 currentNesting += openBraces - closeBraces;
                 maxNesting = Math.max(maxNesting, currentNesting);
             }
-            
-            metrics.nesting = maxNesting;
-            complexity += maxNesting * 2; // Nesting levels contribute more to complexity
 
-            // Function complexity
-            const functionMatches = content.match(/function\s+\w+\s*\(|\)\s*=>\s*{/g);
-            if (functionMatches) {
-                metrics.functionComplexity = functionMatches.length;
-                complexity += functionMatches.length;
-            }
-
-            // Add complexity for class declarations and methods
-            const classMatches = content.match(/class\s+\w+|static\s+\w+|get\s+\w+|set\s+\w+/g);
-            if (classMatches) {
-                complexity += classMatches.length;
-            }
-
-            return Math.min(100, complexity); // Cap complexity at 100
+            return maxNesting;
         } catch (error) {
-            logger.error(`Error calculating complexity: ${error.message}`);
-            return 1; // Return base complexity on error
+            this.logger.warn(`Error in nesting analysis: ${error.message}`);
+            return 0;
+        }
+    }
+
+    calculateFunctionComplexity(content) {
+        const functionPatterns = {
+            traditional: /\bfunction\s+[\w$]+\s*\([^)]*\)/g,
+            arrow: /(?:^|\s)(\([^)]*\)|[\w$]+)\s*=>\s*(?:\{|\S)/gm,
+            method: /(?:^|\s)[\w$]+\s*\([^)]*\)\s*\{/gm
+        };
+
+        try {
+            let complexity = 0;
+            for (const [type, pattern] of Object.entries(functionPatterns)) {
+                const matches = content.match(pattern) || [];
+                complexity += matches.length;
+            }
+            return complexity;
+        } catch (error) {
+            this.logger.warn(`Error in function analysis: ${error.message}`);
+            return 0;
+        }
+    }
+
+    calculateClassComplexity(content) {
+        const classPatterns = {
+            declaration: /\bclass\s+[\w$]+/g,
+            methods: /(?:static\s+)?(?:async\s+)?[\w$]+\s*\([^)]*\)\s*\{/g,
+            accessors: /\b(?:get|set)\s+[\w$]+\s*\(/g,
+            properties: /\b(?:static\s+)?[\w$]+\s*=/g
+        };
+
+        try {
+            let complexity = 0;
+            for (const [type, pattern] of Object.entries(classPatterns)) {
+                const matches = content.match(pattern) || [];
+                complexity += matches.length;
+            }
+            return complexity;
+        } catch (error) {
+            this.logger.warn(`Error in class analysis: ${error.message}`);
+            return 0;
         }
     }
 
