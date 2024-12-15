@@ -5,7 +5,7 @@ const { logger } = require('../utils/logger');
 class TemplateRegistry {
     constructor() {
         this.templates = new Map();
-        this.registryPath = path.join(process.cwd(), '.nodeforge', 'registry.json');
+        this.registryPath = path.join(process.cwd(), '.nodesmith', 'registry.json');
     }
 
     async initialize() {

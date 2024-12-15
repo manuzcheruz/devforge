@@ -36,9 +36,9 @@ Before creating enhancement suggestions, please check the issue list as you migh
 
 The process described here has several goals:
 
-- Maintain NodeForge's quality
+- Maintain NodeSmith's quality
 - Fix problems that are important to users
-- Enable a sustainable system for NodeForge's maintainers to review contributions
+- Enable a sustainable system for NodeSmith's maintainers to review contributions
 
 Please follow these steps to have your contribution considered by the maintainers:
 

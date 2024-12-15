@@ -19,7 +19,7 @@ coverage/
 
 # Environment and local files
 .env*
-.nodeforge/
+.nodesmith/
 *.log
 npm-debug.log*
 
