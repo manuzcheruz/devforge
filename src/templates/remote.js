@@ -9,8 +9,8 @@ const crypto = require('crypto');
 
 class RemoteTemplateManager {
     constructor() {
-        this.tempDir = path.join(os.tmpdir(), '.nodesmith-templates');
-        this.cacheDir = path.join(os.homedir(), '.nodesmith', 'template-cache');
+        this.tempDir = path.join(os.tmpdir(), '.nodeforge-templates');
+        this.cacheDir = path.join(os.homedir(), '.nodeforge', 'template-cache');
         this.cacheMetadataFile = path.join(this.cacheDir, 'metadata.json');
         this.currentUrl = null;
         this.init();
@@ -548,13 +548,13 @@ class RemoteTemplateManager {
             
             // Validate template configuration
             try {
-                const configPath = path.join(templatePath, 'nodesmith.json');
+                const configPath = path.join(templatePath, 'nodeforge.json');
                 const configContent = await fs.readFile(configPath, 'utf-8');
                 const config = JSON.parse(configContent);
                 
                 validationResult.details.configStatus = 'found';
                 if (!config.template) {
-                    warnings.push('nodesmith.json missing template configuration');
+                    warnings.push('nodeforge.json missing template configuration');
                 } else {
                     const requiredConfigFields = ['name', 'version', 'description'];
                     const missingFields = requiredConfigFields.filter(field => !config.template[field]);
@@ -564,7 +564,7 @@ class RemoteTemplateManager {
                 }
             } catch (error) {
                 if (error.code !== 'ENOENT') {
-                    issues.push(`Invalid nodesmith.json: ${error.message}`);
+                    issues.push(`Invalid nodeforge.json: ${error.message}`);
                 }
                 validationResult.details.configStatus = error.code === 'ENOENT' ? 'missing' : 'invalid';
             }

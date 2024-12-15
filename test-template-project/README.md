@@ -1,7 +1,7 @@
 # test-template-project
 
 ## Description
-A Node.js project created with NodeSmith
+A Node.js project created with NodeForge
 
 ## Setup
 1. Install dependencies:

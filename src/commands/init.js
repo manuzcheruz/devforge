@@ -124,7 +124,7 @@ async function createProjectStructure(projectPath, template) {
         const packageJson = {
             name: path.basename(projectPath),
             version: '1.0.0',
-            description: `A Node.js project created with NodeSmith`,
+            description: `A Node.js project created with NodeForge`,
             main: 'src/index.js',
             scripts: {
                 start: 'node src/index.js',

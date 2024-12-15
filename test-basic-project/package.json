@@ -1,7 +1,7 @@
 {
   "name": "test-basic-project",
   "version": "1.0.0",
-  "description": "A Node.js project created with NodeSmith",
+  "description": "A Node.js project created with NodeForge",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

@@ -5,7 +5,6 @@ const ComplexityAnalyzer = require('./metrics/complexity');
 const PerformanceAnalyzer = require('./metrics/performance');
 const QualityAnalyzer = require('./metrics/quality');
 
-// NodeSmith Project Analyzer
 class ProjectAnalyzer {
     constructor() {
         this.complexityAnalyzer = new ComplexityAnalyzer();
@@ -17,14 +16,7 @@ class ProjectAnalyzer {
             dependencies: {},
             quality: {
                 issues: [],
-                linting: {},
-                documentation: {
-                    hasReadme: false,
-                    hasApiDocs: false,
-                    readmeQuality: 0,
-                    coverage: 0,
-                    issues: []
-                }
+                linting: {}
             },
             security: {},
             complexity: {
@@ -83,7 +75,7 @@ class ProjectAnalyzer {
                 await Promise.all(analysisPromises);
 
             // Initialize documentation metrics with defaults
-            const defaultDocumentation = {
+            const documentation = await this.qualityAnalyzer.analyzeDocumentation(normalizedPath, fs) || {
                 hasReadme: false,
                 hasApiDocs: false,
                 readmeQuality: 0,
@@ -91,85 +83,22 @@ class ProjectAnalyzer {
                 issues: []
             };
 
-            // Initialize quality metrics with documentation
-            const defaultQualityMetrics = {
-                issues: [],
-                linting: {},
-                documentation: defaultDocumentation,
-                testCoverage: 0
-            };
-
-            let projectQuality = defaultQualityMetrics;
-            try {
-                const [qualityMetrics, testCoverage, documentation] = await Promise.all([
-                    this.qualityAnalyzer.analyzeCodeQuality(projectPath, fs),
-                    this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs),
-                    this.qualityAnalyzer.analyzeDocumentation(projectPath, fs)
-                ]);
-
-                projectQuality = {
-                    ...defaultQualityMetrics,
-                    ...qualityMetrics,
-                    testCoverage,
-                    documentation: {
-                        ...defaultDocumentation,
-                        ...(documentation || {})
-                    }
-                };
-            } catch (error) {
-                logger.warn(`Quality analysis warning: ${error.message}`);
-            }
-
-            // Ensure all metrics are properly initialized with defaults
             const analysisResults = {
-                structure: structure || {
-                    hasPackageJson: false,
-                    hasReadme: false,
-                    hasTests: false,
-                    hasConfig: false,
-                    hasGitIgnore: false,
-                    sourceFiles: []
-                },
-                dependencies: dependencies || {
-                    direct: 0,
-                    dev: 0,
-                    peer: 0,
-                    typescript: {
-                        hasTypeScript: false,
-                        hasTypesPackages: false
-                    },
-                    production: {},
-                    development: {}
-                },
-                security: security || {
-                    hasPackageLock: false,
-                    securityFiles: {
-                        hasEnvExample: false
-                    },
-                    issues: []
-                },
+                structure,
+                dependencies,
+                security,
                 quality: {
-                    ...defaultQualityMetrics,
-                    ...projectQuality
-                },
-                performance: performance || {
-                    bundleSize: {
-                        raw: 0,
-                        formatted: '0 B'
-                    },
-                    asyncPatterns: {
-                        promises: 0,
-                        asyncAwait: 0,
-                        callbacks: 0
+                    ...quality,
+                    documentation: documentation || {
+                        hasReadme: false,
+                        hasApiDocs: false,
+                        readmeQuality: 0,
+                        coverage: 0,
+                        issues: []
                     }
                 },
-                complexity: complexity || {
-                    cyclomaticComplexity: {
-                        average: 0,
-                        highest: 0,
-                        files: []
-                    }
-                }
+                performance,
+                complexity
             };
 
             const projectRecommendations = this.generateRecommendations(analysisResults);
@@ -198,17 +127,12 @@ class ProjectAnalyzer {
         };
 
         // Check documentation metrics
-        const defaultDocMetrics = {
+        const documentation = metrics?.quality?.documentation || {
             hasReadme: false,
             hasApiDocs: false,
             readmeQuality: 0,
             coverage: 0,
             issues: []
-        };
-        
-        const documentation = {
-            ...defaultDocMetrics,
-            ...(metrics?.quality?.documentation || {})
         };
         
         if (!documentation.hasReadme) {
@@ -361,82 +285,18 @@ class ProjectAnalyzer {
     async analyzeCodeQuality(projectPath) {
         logger.info('Analyzing code quality...');
         try {
-            const [qualityMetrics, testCoverage, documentation] = await Promise.all([
+            const [qualityMetrics, testCoverage] = await Promise.all([
                 this.qualityAnalyzer.analyzeCodeQuality(projectPath, fs),
-                this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs),
-                (async () => {
-                    const docMetrics = {
-                        hasReadme: false,
-                        hasApiDocs: false,
-                        readmeQuality: 0,
-                        coverage: 0,
-                        issues: []
-                    };
-
-                    try {
-                        // Check README.md
-                        docMetrics.hasReadme = await fs.access(path.join(projectPath, 'README.md'))
-                            .then(() => true)
-                            .catch(() => false);
-                        
-                        // Check API documentation
-                        docMetrics.hasApiDocs = await fs.access(path.join(projectPath, 'docs/api'))
-                            .then(() => true)
-                            .catch(() => false);
-
-                        // Calculate basic documentation coverage
-                        let coveragePoints = 0;
-                        if (docMetrics.hasReadme) coveragePoints += 50;
-                        if (docMetrics.hasApiDocs) coveragePoints += 30;
-                        
-                        // Check for additional documentation files
-                        const contributingExists = await fs.access(path.join(projectPath, 'CONTRIBUTING.md'))
-                            .then(() => true)
-                            .catch(() => false);
-                        if (contributingExists) coveragePoints += 20;
-
-                        docMetrics.coverage = Math.min(100, coveragePoints);
-                        
-                        // Basic readme quality check if exists
-                        if (docMetrics.hasReadme) {
-                            const readmeContent = await fs.readFile(path.join(projectPath, 'README.md'), 'utf-8');
-                            const sections = readmeContent.split('\n#').length;
-                            const hasCodeExamples = readmeContent.includes('```');
-                            const hasInstallation = /installation|setup|getting started/i.test(readmeContent);
-                            
-                            docMetrics.readmeQuality = Math.min(100, 
-                                (sections > 3 ? 40 : 20) + 
-                                (hasCodeExamples ? 30 : 0) + 
-                                (hasInstallation ? 30 : 0)
-                            );
-                        }
-
-                        return docMetrics;
-                    } catch (docError) {
-                        logger.warn(`Documentation analysis warning: ${docError.message}`);
-                        return docMetrics;
-                    }
-                })()
+                this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs)
             ]);
 
             return {
                 ...qualityMetrics,
-                testCoverage,
-                documentation
+                testCoverage
             };
         } catch (error) {
             logger.error(`Code quality analysis failed: ${error.message}`);
-            return {
-                issues: [],
-                testCoverage: 0,
-                documentation: {
-                    hasReadme: false,
-                    hasApiDocs: false,
-                    readmeQuality: 0,
-                    coverage: 0,
-                    issues: []
-                }
-            };
+            throw error;
         }
     }
 

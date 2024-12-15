@@ -1,7 +1,6 @@
 const path = require('path');
 const { logger } = require('../../utils/logger');
 
-// NodeSmith Quality Analyzer
 class QualityAnalyzer {
     async analyzeCodeQuality(projectPath, fs) {
         if (!fs) {

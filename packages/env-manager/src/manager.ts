@@ -1,5 +1,4 @@
 import { exec } from 'child_process';
-// NodeSmith Environment Manager
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { promisify } from 'util';
