@@ -44,28 +44,62 @@ class ProjectAnalyzer {
         logger.info('Starting project analysis...');
         
         try {
-            // Verify project path exists
-            try {
-                await fs.access(projectPath);
-            } catch (error) {
-                throw new Error(`Project path does not exist: ${projectPath}`);
+            // Validate project path
+            if (!projectPath || typeof projectPath !== 'string') {
+                throw new Error('Valid project path is required');
             }
 
-            const sourceFiles = await this.findSourceFiles(projectPath);
-            
-            // Initialize metrics structure
+            const normalizedPath = path.resolve(projectPath);
+            try {
+                const stats = await fs.stat(normalizedPath);
+                if (!stats.isDirectory()) {
+                    throw new Error('Project path must be a directory');
+                }
+            } catch (error) {
+                throw new Error(`Project path is not accessible: ${error.message}`);
+            }
+
+            // Initialize metrics with default values
             this.metrics = {
-                structure: {},
+                structure: {
+                    hasPackageJson: false,
+                    hasReadme: false,
+                    hasTests: false,
+                    hasConfig: false,
+                    hasGitIgnore: false,
+                    sourceFiles: []
+                },
                 dependencies: {
-                    production: [],
-                    development: []
+                    direct: 0,
+                    dev: 0,
+                    peer: 0,
+                    typescript: {
+                        hasTypeScript: false,
+                        hasTypesPackages: false
+                    },
+                    production: {},
+                    development: {}
                 },
                 quality: {
                     issues: [],
-                    linting: {},
-                    maintainabilityIndex: 0
+                    linting: {
+                        hasEslint: false,
+                        hasPrettier: false
+                    },
+                    maintainabilityIndex: 70,
+                    typescript: false,
+                    testing: {
+                        hasJest: false,
+                        hasMocha: false
+                    }
                 },
-                security: {},
+                security: {
+                    hasPackageLock: false,
+                    securityFiles: {
+                        hasEnvExample: false
+                    },
+                    issues: []
+                },
                 complexity: {
                     cyclomaticComplexity: {
                         average: 0,
@@ -86,85 +120,137 @@ class ProjectAnalyzer {
                 }
             };
 
-            // Basic structure analysis
-            logger.info('Analyzing project structure...');
-            await this.analyzeStructure(projectPath);
-            this.metrics.structure.sourceFiles = sourceFiles;
+            // Find source files first as they're needed by multiple analyzers
+            logger.info('Finding source files...');
+            const sourceFiles = await this.findSourceFiles(normalizedPath);
+            if (!Array.isArray(sourceFiles)) {
+                throw new Error('Invalid source files result');
+            }
+            logger.info(`Found ${sourceFiles.length} source files to analyze`);
 
-            // Dependencies analysis
-            logger.info('Analyzing dependencies...');
-            await this.analyzeDependencies(projectPath);
+            // Execute analysis components in parallel
+            logger.info('Starting parallel analysis of project components...');
+            const analysisPromises = [
+                {
+                    name: 'structure',
+                    promise: (async () => {
+                        logger.info('Analyzing project structure...');
+                        const structure = await this.analyzeStructure(normalizedPath);
+                        return { ...structure, sourceFiles };
+                    })()
+                },
+                {
+                    name: 'dependencies',
+                    promise: (async () => {
+                        logger.info('Analyzing dependencies...');
+                        return await this.analyzeDependencies(normalizedPath);
+                    })()
+                },
+                {
+                    name: 'security',
+                    promise: (async () => {
+                        logger.info('Analyzing security...');
+                        return await this.analyzeSecurity(normalizedPath);
+                    })()
+                },
+                {
+                    name: 'quality',
+                    promise: (async () => {
+                        logger.info('Analyzing code quality...');
+                        return await this.qualityAnalyzer.analyzeCodeQuality(normalizedPath, fs);
+                    })()
+                },
+                {
+                    name: 'performance',
+                    promise: (async () => {
+                        logger.info('Analyzing performance metrics...');
+                        const bundleSize = await this.performanceAnalyzer.analyzeBundleSize(sourceFiles, fs);
+                        const asyncPatterns = await this.performanceAnalyzer.analyzeAsyncPatterns(sourceFiles, fs);
+                        return { bundleSize, asyncPatterns };
+                    })()
+                },
+                {
+                    name: 'complexity',
+                    promise: (async () => {
+                        logger.info('Analyzing code complexity...');
+                        return await this.complexityAnalyzer.analyzeComplexity(sourceFiles, fs);
+                    })()
+                }
+            ];
 
-            // Security analysis
-            logger.info('Analyzing security...');
-            await this.analyzeSecurity(projectPath);
+            const analysisResults = await Promise.allSettled(analysisPromises.map(({ promise }) => promise));
+            const warnings = [];
 
-            // Code quality analysis
-            logger.info('Analyzing code quality...');
-            const qualityMetrics = await this.qualityAnalyzer.analyzeCodeQuality(projectPath, fs, sourceFiles);
-            this.metrics.quality = {
-                ...this.metrics.quality,
-                ...qualityMetrics
-            };
+            // Process results and handle failures
+            analysisResults.forEach((result, index) => {
+                const { name } = analysisPromises[index];
+                if (result.status === 'fulfilled') {
+                    if (result.value && typeof result.value === 'object') {
+                        this.metrics[name] = {
+                            ...this.metrics[name],
+                            ...result.value
+                        };
+                    }
+                } else {
+                    const errorMessage = `${name} analysis failed: ${result.reason.message}`;
+                    logger.error(errorMessage);
+                    warnings.push(errorMessage);
+                }
+            });
 
-            // Best practices
-            logger.info('Checking best practices...');
-            await this.analyzeBestPractices(projectPath);
-
-            // Performance metrics
-            logger.info('Analyzing performance metrics...');
-            const [bundleSize, asyncPatterns] = await Promise.all([
-                this.performanceAnalyzer.analyzeBundleSize(sourceFiles, fs),
-                this.performanceAnalyzer.analyzeAsyncPatterns(sourceFiles, fs)
-            ]);
-            this.metrics.performance = { bundleSize, asyncPatterns };
-
-            // Code complexity
-            logger.info('Analyzing code complexity...');
-            const complexityMetrics = await this.complexityAnalyzer.analyzeComplexity(sourceFiles, fs);
-            this.metrics.complexity = {
-                ...this.metrics.complexity,
-                ...complexityMetrics
-            };
-
+            // Return comprehensive analysis results
             return {
                 status: 'success',
                 metrics: this.metrics,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                projectPath: normalizedPath,
+                sourceFiles: sourceFiles.length,
+                warnings: warnings.length > 0 ? warnings : undefined
             };
         } catch (error) {
-            logger.error(`Analysis failed: ${error.message}`);
-            throw error;
+            logger.error(`Project analysis failed: ${error.message}`);
+            return {
+                status: 'error',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            };
         }
     }
 
     async analyzeStructure(projectPath) {
-        const hasPackageJson = await fs.access(path.join(projectPath, 'package.json'))
-            .then(() => true)
-            .catch(() => false);
-        const hasReadme = await fs.access(path.join(projectPath, 'README.md'))
-            .then(() => true)
-            .catch(() => false);
-        const hasTests = await fs.access(path.join(projectPath, '__tests__'))
-            .then(() => true)
-            .catch(() => false);
-        const hasConfig = await fs.access(path.join(projectPath, 'config'))
-            .then(() => true)
-            .catch(() => false);
-        const hasGitIgnore = await fs.access(path.join(projectPath, '.gitignore'))
-            .then(() => true)
-            .catch(() => false);
+        try {
+            const [
+                hasPackageJson,
+                hasReadme,
+                hasTests,
+                hasConfig,
+                hasGitIgnore
+            ] = await Promise.all([
+                fs.access(path.join(projectPath, 'package.json')).then(() => true).catch(() => false),
+                fs.access(path.join(projectPath, 'README.md')).then(() => true).catch(() => false),
+                fs.access(path.join(projectPath, '__tests__')).then(() => true).catch(() => false),
+                fs.access(path.join(projectPath, 'config')).then(() => true).catch(() => false),
+                fs.access(path.join(projectPath, '.gitignore')).then(() => true).catch(() => false)
+            ]);
 
-        const sourceFiles = await this.findSourceFiles(projectPath);
+            // Find source files
+            const sourceFiles = await this.findSourceFiles(projectPath);
 
-        this.metrics.structure = {
-            hasPackageJson,
-            hasReadme,
-            hasTests,
-            hasConfig,
-            hasGitIgnore,
-            sourceFiles
-        };
+            // Update metrics structure with all fields
+            this.metrics.structure = {
+                hasPackageJson,
+                hasReadme,
+                hasTests,
+                hasConfig,
+                hasGitIgnore,
+                sourceFiles: sourceFiles || [] // Ensure it's always an array
+            };
+
+            return this.metrics.structure;
+        } catch (error) {
+            logger.error(`Structure analysis failed: ${error.message}`);
+            throw error;
+        }
     }
 
     async analyzeDependencies(projectPath) {
@@ -360,28 +446,55 @@ class ProjectAnalyzer {
     }
 
     async findSourceFiles(projectPath) {
-        const sourceFiles = [];
-        const walk = async (dir) => {
-            const entries = await fs.readdir(dir, { withFileTypes: true });
-            
-            for (const entry of entries) {
-                const fullPath = path.join(dir, entry.name);
-                
-                if (entry.isDirectory() && 
-                    !entry.name.startsWith('.') && 
-                    entry.name !== 'node_modules') {
-                    await walk(fullPath);
-                } else if (entry.isFile() && 
-                    /\.(js|jsx|ts|tsx)$/.test(entry.name) &&
-                    !entry.name.includes('.test.') &&
-                    !entry.name.includes('.spec.')) {
-                    sourceFiles.push(fullPath);
-                }
-            }
-        };
+        if (!projectPath || typeof projectPath !== 'string') {
+            logger.error('Invalid project path provided to findSourceFiles');
+            return [];
+        }
 
-        await walk(projectPath);
-        return sourceFiles;
+        const sourceFiles = new Set();
+        const ignoredDirs = new Set([
+            'node_modules', 'coverage', 'dist', 'build',
+            '.git', '.svn', '.hg', 'vendor', 'tmp'
+        ]);
+        const sourceFileExtensions = new Set(['.js', '.jsx', '.ts', '.tsx']);
+        const testFilePatterns = ['.test.', '.spec.', '.d.ts', '.min.js'];
+        
+        try {
+            const walk = async (dir) => {
+                try {
+                    const entries = await fs.readdir(dir, { withFileTypes: true });
+                    
+                    for (const entry of entries) {
+                        // Skip ignored directories and files
+                        if (entry.name.startsWith('.') || ignoredDirs.has(entry.name)) {
+                            continue;
+                        }
+
+                        const fullPath = path.join(dir, entry.name);
+                        
+                        if (entry.isDirectory()) {
+                            await walk(fullPath).catch(error => {
+                                logger.warn(`Skipping directory ${fullPath}: ${error.message}`);
+                            });
+                        } else if (entry.isFile()) {
+                            const ext = path.extname(entry.name).toLowerCase();
+                            if (sourceFileExtensions.has(ext) && 
+                                !testFilePatterns.some(pattern => entry.name.includes(pattern))) {
+                                sourceFiles.add(fullPath);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    logger.warn(`Error reading directory ${dir}: ${error.message}`);
+                }
+            };
+
+            await walk(projectPath);
+            return Array.from(sourceFiles);
+        } catch (error) {
+            logger.error(`Failed to find source files: ${error.message}`);
+            return [];
+        }
     }
 
     formatBytes(bytes) {

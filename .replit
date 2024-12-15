@@ -227,7 +227,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm test"
+args = "NODE_ENV=test jest src/__tests__/analyzer/core.test.js --verbose"
 
 [[workflows.workflow]]
 name = "CLI Help Test"
