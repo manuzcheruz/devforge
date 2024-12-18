@@ -303,12 +303,19 @@ class ProjectAnalyzer {
     async analyzePerformance(sourceFiles) {
         logger.info('Analyzing performance metrics...');
         try {
-            const [bundleSize, asyncPatterns] = await Promise.all([
+            const [bundleSize, asyncPatterns, memoryUsage, executionTime] = await Promise.all([
                 this.performanceAnalyzer.analyzeBundleSize(sourceFiles, fs),
-                this.performanceAnalyzer.analyzeAsyncPatterns(sourceFiles, fs)
+                this.performanceAnalyzer.analyzeAsyncPatterns(sourceFiles, fs),
+                this.performanceAnalyzer.analyzeMemoryUsage(),
+                this.performanceAnalyzer.analyzeExecutionTime(sourceFiles, fs)
             ]);
 
-            return { bundleSize, asyncPatterns };
+            return { 
+                bundleSize, 
+                asyncPatterns,
+                memoryUsage,
+                executionTime
+            };
         } catch (error) {
             logger.error(`Performance analysis failed: ${error.message}`);
             throw error;
