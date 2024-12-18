@@ -1,6 +1,6 @@
-# NodeForge
+# DevForge
 
-A Node.js development workflow automation tool that standardizes project setup and configuration through template-based project generation. The system features a plugin manager for extensibility and customization of project templates, complemented by integrated project analysis capabilities.
+A comprehensive Node.js development workflow automation tool that standardizes project setup and configuration through template-based project generation. The system features a plugin manager for extensibility and customization of project templates, complemented by integrated project analysis capabilities.
 
 ## Features
 
@@ -15,20 +15,20 @@ A Node.js development workflow automation tool that standardizes project setup a
 ## Installation
 
 ```bash
-npm install -g nodeforge
+npm install -g devforge
 ```
 
 ## Quick Start
 
 ```bash
 # Create a new project
-nodeforge init -n my-project -t express-api
+devforge init -n my-project -t express-api
 
 # Analyze an existing project
-nodeforge analyze
+devforge analyze
 
 # Check environment setup
-nodeforge env --check
+devforge env --check
 ```
 
 ## CLI Commands
@@ -36,36 +36,36 @@ nodeforge env --check
 ### Project Initialization
 ```bash
 # Basic project creation
-nodeforge init -n <project-name> -t <template-name>
+devforge init -n <project-name> -t <template-name>
 
 # With template variant
-nodeforge init -n <project-name> -t <template-name> -v <variant>
+devforge init -n <project-name> -t <template-name> -v <variant>
 
 # With custom variables
-nodeforge init -n <project-name> -t <template-name> --vars "port=3000,useTypescript=true"
+devforge init -n <project-name> -t <template-name> --vars "port=3000,useTypescript=true"
 
 # Using remote template
-nodeforge init -n <project-name> --url <git-repo-url> --version <version>
+devforge init -n <project-name> --url <git-repo-url> --version <version>
 ```
 
 ### Project Analysis
 ```bash
 # Full project analysis
-nodeforge analyze
+devforge analyze
 
 # Specific analysis
-nodeforge analyze --metrics          # Code metrics only
-nodeforge analyze --quality          # Code quality only
-nodeforge analyze --complexity       # Code complexity only
-nodeforge analyze --performance      # Performance metrics only
-nodeforge analyze --documentation    # Documentation coverage
+devforge analyze --metrics          # Code metrics only
+devforge analyze --quality          # Code quality only
+devforge analyze --complexity       # Code complexity only
+devforge analyze --performance      # Performance metrics only
+devforge analyze --documentation    # Documentation coverage
 
 # Analysis with specific focus
-nodeforge analyze --quality --maintainability  # Check maintainability
-nodeforge analyze --quality --issues           # Check code issues
-nodeforge analyze --quality --duplication      # Check code duplication
-nodeforge analyze --performance --async        # Check async patterns
-nodeforge analyze --performance --bundle       # Check bundle size
+devforge analyze --quality --maintainability  # Check maintainability
+devforge analyze --quality --issues           # Check code issues
+devforge analyze --quality --duplication      # Check code duplication
+devforge analyze --performance --async        # Check async patterns
+devforge analyze --performance --bundle       # Check bundle size
 ```
 
 ## Project Analysis Features
@@ -106,7 +106,7 @@ The analysis tool provides comprehensive insights into your project's code quali
 
 ```bash
 # Run performance analysis
-nodeforge analyze --performance
+devforge analyze --performance
 ```
 
 #### Bundle Analysis
@@ -148,12 +148,12 @@ Comprehensive test coverage analysis with detailed metrics:
 
 ```bash
 # Full test coverage analysis
-nodeforge analyze --coverage
+devforge analyze --coverage
 
 # Specific coverage checks
-nodeforge analyze --coverage --unit       # Unit test coverage
-nodeforge analyze --coverage --integration # Integration test coverage
-nodeforge analyze --coverage --summary     # Coverage summary
+devforge analyze --coverage --unit       # Unit test coverage
+devforge analyze --coverage --integration # Integration test coverage
+devforge analyze --coverage --summary     # Coverage summary
 ```
 
 #### Coverage Metrics:
@@ -176,7 +176,7 @@ nodeforge analyze --coverage --summary     # Coverage summary
 
 ```bash
 # Analyze documentation coverage
-nodeforge analyze --documentation
+devforge analyze --documentation
 ```
 
 Analyzes:
@@ -237,16 +237,16 @@ Common variables supported by templates:
 
 Use any Git repository as a template:
 ```bash
-nodeforge init -n my-project --url https://github.com/username/repo.git
+devforge init -n my-project --url https://github.com/username/repo.git
 ```
 
 Version control support:
 ```bash
 # Use specific version
-nodeforge init -n my-project --url <repo-url> --version v1.2.3
+devforge init -n my-project --url <repo-url> --version v1.2.3
 
 # Use specific branch
-nodeforge init -n my-project --url <repo-url> --version develop
+devforge init -n my-project --url <repo-url> --version develop
 ```
 
 ## Plugin Development
@@ -282,9 +282,9 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## Support
 
-- Documentation: [https://nodeforge.dev/docs](https://nodeforge.dev/docs)
-- Issues: [GitHub Issues](https://github.com/nodeforge/nodeforge/issues)
-- Discussions: [GitHub Discussions](https://github.com/nodeforge/nodeforge/discussions)
+- Documentation: [https://devforge.dev/docs](https://devforge.dev/docs)
+- Issues: [GitHub Issues](https://github.com/devforge/devforge/issues)
+- Discussions: [GitHub Discussions](https://github.com/devforge/devforge/discussions)
 
 ## License
 

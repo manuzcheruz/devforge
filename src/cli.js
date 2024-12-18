@@ -6,14 +6,14 @@ const { loadConfig } = require('./commands/config');
 
 class CLI {
     constructor() {
-        this.program = new Command();
+        this.program = new Command('devforge');
         this.setupCommands();
     }
 
     setupCommands() {
         this.program
             .version('1.0.0')
-            .description('NodeSmith - Node.js Development Workflow Automation Tool');
+            .description('DevForge - Node.js Development Workflow Automation Tool');
 
         this.program
             .command('init')
