@@ -71,23 +71,17 @@ class ProjectAnalyzer {
                 this.analyzeComplexity(sourceFiles)
             ];
 
-            // Initialize documentation analysis first
-            let documentation;
-            try {
-                documentation = await this.qualityAnalyzer.analyzeDocumentation(normalizedPath, fs);
-            } catch (error) {
-                logger.warn(`Documentation analysis failed: ${error.message}`);
-                documentation = {
-                    hasReadme: false,
-                    hasApiDocs: false,
-                    readmeQuality: 0,
-                    coverage: 0,
-                    issues: []
-                };
-            }
-
             const [structure, dependencies, security, quality, performance, complexity] = 
                 await Promise.all(analysisPromises);
+
+            // Initialize documentation metrics with defaults
+            const documentation = await this.qualityAnalyzer.analyzeDocumentation(normalizedPath, fs) || {
+                hasReadme: false,
+                hasApiDocs: false,
+                readmeQuality: 0,
+                coverage: 0,
+                issues: []
+            };
 
             const analysisResults = {
                 structure,
@@ -95,7 +89,13 @@ class ProjectAnalyzer {
                 security,
                 quality: {
                     ...quality,
-                    documentation
+                    documentation: documentation || {
+                        hasReadme: false,
+                        hasApiDocs: false,
+                        readmeQuality: 0,
+                        coverage: 0,
+                        issues: []
+                    }
                 },
                 performance,
                 complexity
