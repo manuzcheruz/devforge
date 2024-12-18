@@ -77,9 +77,14 @@ describe('Plugin SDK', () => {
         test('fails with invalid hook structure', async () => {
             const invalidTemplate = {
                 ...validApiTemplate,
-                hooks: [{ event: 'PRE_EXECUTE' }] // Missing description
+                hooks: [{ 
+                    event: 'PRE_EXECUTE',
+                    // Missing description to trigger validation error
+                }]
             };
-            await expect(sdk.createPlugin(invalidTemplate)).rejects.toThrow(/Hook must have both/);
+            await expect(sdk.createPlugin(invalidTemplate))
+                .rejects
+                .toThrow('Hook must have both event and description defined');
         });
     });
 

@@ -20,15 +20,28 @@ const pluginTemplateSchema = z.object({
         .refine(caps => Object.keys(caps).length > 0, {
             message: "At least one capability must be defined"
         }),
-    hooks: z.array(z.object({
-        event: z.string()
-            .min(1, "Event name is required")
-            .refine(val => ['PRE_EXECUTE', 'POST_EXECUTE', 'PRE_INIT', 'POST_INIT'].includes(val), {
-                message: "Invalid event name. Must be one of: PRE_EXECUTE, POST_EXECUTE, PRE_INIT, POST_INIT"
+    hooks: z.array(
+        z.object({
+            event: z.string({
+                required_error: "Hook must have both event and description defined"
             }),
-        description: z.string()
-            .min(10, "Hook description must be at least 10 characters")
-    })).optional()
+            description: z.string({
+                required_error: "Hook must have both event and description defined"
+            })
+        }).refine(
+            hook => hook.event && hook.description, {
+                message: "Hook must have both event and description defined"
+            }
+        ).refine(
+            hook => ['PRE_EXECUTE', 'POST_EXECUTE', 'PRE_INIT', 'POST_INIT'].includes(hook.event), {
+                message: "Invalid event name. Must be one of: PRE_EXECUTE, POST_EXECUTE, PRE_INIT, POST_INIT"
+            }
+        ).refine(
+            hook => hook.description.length >= 10, {
+                message: "Hook description must be at least 10 characters long"
+            }
+        )
+    ).optional()
 });
 
 class PluginSDK {

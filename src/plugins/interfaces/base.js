@@ -1,4 +1,52 @@
 const { z } = require('zod');
+const { EventEmitter } = require('events');
+
+// Custom Event Emitter for Plugin System
+class PluginEventEmitter extends EventEmitter {
+    constructor() {
+        super();
+        this.transformers = new Map();
+        this.middlewares = new Map();
+    }
+
+    transform(eventName, transformer) {
+        if (!this.transformers.has(eventName)) {
+            this.transformers.set(eventName, new Set());
+        }
+        this.transformers.get(eventName).add(transformer);
+        return this;
+    }
+
+    use(eventPattern, middleware) {
+        if (!this.middlewares.has(eventPattern)) {
+            this.middlewares.set(eventPattern, new Set());
+        }
+        this.middlewares.get(eventPattern).add(middleware);
+        return this;
+    }
+
+    async emitAsync(eventName, payload) {
+        // Apply middlewares
+        for (const [pattern, middlewares] of this.middlewares) {
+            if (eventName.match(pattern)) {
+                for (const middleware of middlewares) {
+                    const shouldContinue = await middleware(payload);
+                    if (!shouldContinue) return false;
+                }
+            }
+        }
+
+        // Apply transformations
+        let transformedPayload = payload;
+        if (this.transformers.has(eventName)) {
+            for (const transformer of this.transformers.get(eventName)) {
+                transformedPayload = await transformer(transformedPayload);
+            }
+        }
+
+        return super.emit(eventName, transformedPayload);
+    }
+}
 
 // Plugin Lifecycle Events
 const LIFECYCLE_EVENTS = {
