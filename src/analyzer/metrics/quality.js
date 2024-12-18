@@ -4,38 +4,27 @@ const { logger } = require('../../utils/logger');
 class QualityAnalyzer {
     async analyzeCodeQuality(projectPath, fs) {
         if (!fs) {
-            throw new Error('FileSystem (fs) parameter is required for analyzeCodeQuality');
+            logger.warn('FileSystem (fs) parameter is required for analyzeCodeQuality');
+            return this.getDefaultQualityMetrics();
         }
 
         try {
-            // Initialize default metrics object
-            const metrics = {
-                linting: {
-                    hasEslint: false,
-                    hasPrettier: false
-                },
-                testing: {
-                    hasJest: false,
-                    hasMocha: false
-                },
-                documentation: {
-                    hasReadme: false,
-                    hasApiDocs: false,
-                    readmeQuality: 0,
-                    coverage: 0,
-                    issues: []
-                },
-                maintainabilityIndex: 70, // Default value
-                issues: [],
-                fileAnalyses: [],
-                duplicationScore: 100,
-                testCoverage: {
-                    lines: 0,
-                    functions: 0,
-                    branches: 0,
-                    statements: 0
-                }
-            };
+            // Initialize metrics with default values
+            const metrics = this.getDefaultQualityMetrics();
+
+            // Analyze documentation with proper error handling
+            try {
+                const docAnalysis = await this.analyzeDocumentation(projectPath, fs);
+                metrics.documentation = {
+                    ...metrics.documentation,
+                    ...docAnalysis
+                };
+            } catch (error) {
+                logger.warn(`Documentation analysis failed: ${error.message}`);
+                // Keep default documentation metrics
+            }
+
+            logger.info('Documentation analysis completed');
 
             // Analyze linting configuration
             const [hasEslint, hasPrettier] = await Promise.all([
@@ -703,17 +692,12 @@ class QualityAnalyzer {
     }
     async analyzeDocumentation(projectPath, fs) {
         if (!fs) {
-            throw new Error('FileSystem (fs) parameter is required for analyzeDocumentation');
+            logger.warn('FileSystem (fs) parameter is required for analyzeDocumentation');
+            return this.getDefaultDocMetrics();
         }
 
         try {
-            const docMetrics = {
-                hasReadme: false,
-                hasApiDocs: false,
-                readmeQuality: 0,
-                coverage: 0,
-                issues: []
-            };
+            const docMetrics = this.getDefaultDocMetrics();
 
             // Check for README
             const readmePaths = ['README.md', 'Readme.md', 'readme.md'];
@@ -748,33 +732,67 @@ class QualityAnalyzer {
             }
 
             // Calculate documentation coverage
-            const sourceFiles = await this.findSourceFiles(projectPath, fs);
-            let documentedFiles = 0;
+            try {
+                const sourceFiles = await this.findSourceFiles(projectPath, fs);
+                let documentedFiles = 0;
 
-            for (const file of sourceFiles) {
-                const content = await fs.readFile(file, 'utf-8');
-                const hasJsDoc = content.includes('/**') || content.includes('///');
-                if (hasJsDoc) documentedFiles++;
+                for (const file of sourceFiles) {
+                    try {
+                        const content = await fs.readFile(file, 'utf-8');
+                        const hasJsDoc = content.includes('/**') || content.includes('///');
+                        if (hasJsDoc) documentedFiles++;
+                    } catch (error) {
+                        logger.warn(`Error reading file ${file}: ${error.message}`);
+                        continue;
+                    }
+                }
+
+                docMetrics.coverage = sourceFiles.length > 0 
+                    ? Math.round((documentedFiles / sourceFiles.length) * 100)
+                    : 0;
+            } catch (error) {
+                logger.warn(`Error calculating documentation coverage: ${error.message}`);
             }
-
-            docMetrics.coverage = sourceFiles.length > 0 
-                ? Math.round((documentedFiles / sourceFiles.length) * 100)
-                : 0;
 
             return docMetrics;
         } catch (error) {
             logger.warn(`Documentation analysis failed: ${error.message}`);
-            return {
-                hasReadme: false,
-                hasApiDocs: false,
-                readmeQuality: 0,
-                coverage: 0,
-                issues: [{
-                    type: 'error',
-                    message: `Documentation analysis failed: ${error.message}`
-                }]
-            };
+            return this.getDefaultDocMetrics();
         }
+    }
+
+    getDefaultDocMetrics() {
+        return {
+            hasReadme: false,
+            hasApiDocs: false,
+            readmeQuality: 0,
+            coverage: 0,
+            issues: []
+        };
+    }
+
+    getDefaultQualityMetrics() {
+        return {
+            linting: {
+                hasEslint: false,
+                hasPrettier: false
+            },
+            testing: {
+                hasJest: false,
+                hasMocha: false
+            },
+            documentation: this.getDefaultDocMetrics(),
+            maintainabilityIndex: 70,
+            issues: [],
+            fileAnalyses: [],
+            duplicationScore: 100,
+            testCoverage: {
+                lines: 0,
+                functions: 0,
+                branches: 0,
+                statements: 0
+            }
+        };
     }
 
     analyzeReadmeQuality(content) {
