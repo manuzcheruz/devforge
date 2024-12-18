@@ -8,7 +8,7 @@ class TestPlugin extends APIPlugin {
             name: 'core-test-plugin',
             version: '1.0.0',
             type: 'api',
-            description: 'Test plugin for NodeForge',
+            description: 'A comprehensive test plugin for NodeForge development and validation',
             author: 'NodeForge',
             capabilities: {
                 design: true,
@@ -19,15 +19,19 @@ class TestPlugin extends APIPlugin {
             },
             hooks: [
                 {
-                    event: LIFECYCLE_EVENTS.PRE_EXECUTE,
+                    event: 'PRE_EXECUTE',
+                    description: 'Validates plugin context and requirements before execution',
                     handler: async (context) => {
                         logger.info(`[TestPlugin] Pre-execute hook triggered with context:`, context);
+                        return { success: true, context };
                     }
                 },
                 {
-                    event: LIFECYCLE_EVENTS.POST_EXECUTE,
+                    event: 'POST_EXECUTE',
+                    description: 'Performs cleanup and logging after plugin execution completes',
                     handler: async (context) => {
                         logger.info(`[TestPlugin] Post-execute hook triggered with context:`, context);
+                        return { success: true, context };
                     }
                 }
             ]

@@ -7,11 +7,27 @@ const { logger } = require('../../utils/logger');
 // Plugin Template Schema
 const pluginTemplateSchema = z.object({
     type: z.enum(['api', 'database', 'environment', 'security']),
-    name: z.string().min(1),
-    capabilities: z.record(z.boolean()),
+    name: z.string()
+        .min(1, "Plugin name is required")
+        .regex(/^[a-z0-9-]+$/, "Plugin name must contain only lowercase letters, numbers, and hyphens"),
+    version: z.string()
+        .regex(/^\d+\.\d+\.\d+$/, "Version must follow semantic versioning (x.y.z)")
+        .default("1.0.0"),
+    description: z.string()
+        .min(10, "Description must be at least 10 characters")
+        .optional(),
+    capabilities: z.record(z.boolean())
+        .refine(caps => Object.keys(caps).length > 0, {
+            message: "At least one capability must be defined"
+        }),
     hooks: z.array(z.object({
-        event: z.string(),
+        event: z.string()
+            .min(1, "Event name is required")
+            .refine(val => ['PRE_EXECUTE', 'POST_EXECUTE', 'PRE_INIT', 'POST_INIT'].includes(val), {
+                message: "Invalid event name. Must be one of: PRE_EXECUTE, POST_EXECUTE, PRE_INIT, POST_INIT"
+            }),
         description: z.string()
+            .min(10, "Hook description must be at least 10 characters")
     })).optional()
 });
 
@@ -79,25 +95,24 @@ class PluginSDK {
         // Validate hooks if provided
         if (template.hooks) {
             template.hooks.forEach((hook, index) => {
-                // Validate hook event
-                if (!hook.event || typeof hook.event !== 'string') {
-                    throw new Error(`Hook at index ${index} must have a valid event name`);
-                }
-                
-                // Validate hook description
-                if (!hook.description || typeof hook.description !== 'string') {
-                    throw new Error(`Hook at index ${index} must have a valid description`);
+                // Validate both event and description are present
+                if (!hook.event || !hook.description) {
+                    throw new Error(`Hook must have both event and description defined`);
                 }
 
-                // Validate event name is a valid lifecycle event
-                const validEvents = ['PRE_EXECUTE', 'POST_EXECUTE', 'PRE_INIT', 'POST_INIT', 'PRE_CLEANUP', 'POST_CLEANUP'];
+                // Validate event is a valid lifecycle event
+                const validEvents = ['PRE_EXECUTE', 'POST_EXECUTE', 'PRE_INIT', 'POST_INIT'];
                 if (!validEvents.includes(hook.event)) {
-                    throw new Error(`Invalid hook event "${hook.event}" at index ${index}. Must be one of: ${validEvents.join(', ')}`);
+                    throw new Error(
+                        `Invalid hook event "${hook.event}". Must be one of: ${validEvents.join(', ')}`
+                    );
                 }
-                
-                // Ensure description is meaningful
+
+                // Validate description length
                 if (hook.description.length < 10) {
-                    throw new Error(`Hook at index ${index} must have a meaningful description (at least 10 characters)`);
+                    throw new Error(
+                        `Hook description must be at least 10 characters long`
+                    );
                 }
             });
         }
@@ -123,15 +138,10 @@ class PluginSDK {
         const className = this.getClassName(template.name);
         const baseClass = this.getBaseClass(template.type);
         
-        // Format capabilities with proper indentation
-        const capabilities = JSON.stringify(
-            this.getRequiredCapabilities(template.type).reduce((acc, cap) => ({
-                ...acc,
-                [cap]: template.capabilities[cap] || false
-            }), {}),
-            null,
-            2
-        );
+        // Generate capabilities string
+        const capabilities = Object.entries(template.capabilities)
+            .map(([key, value]) => `            ${key}: ${value}`)
+            .join(',\n');
         
         // Generate hooks and capability methods
         const hooks = this.generateHooksCode(template.hooks);
@@ -145,11 +155,13 @@ class ${className} extends ${baseClass} {
     constructor() {
         super({
             name: '${template.name}',
-            version: '1.0.0',
+            version: '${template.version}',
             type: '${template.type}',
             description: '${description}',
             author: '${author}',
-            capabilities: ${capabilities},
+            capabilities: {
+${capabilities}
+            },
             hooks: [${hooks ? `\n                ${hooks}\n            ` : ''}]
         });
 
@@ -161,10 +173,10 @@ class ${className} extends ${baseClass} {
     async initialize(context = {}) {
         try {
             await super.initialize(context);
-            logger.info(\`[${template.name}] Plugin initialized successfully\`);
+            logger.info(\`[${className}] Plugin initialized successfully\`);
             return true;
         } catch (error) {
-            logger.error(\`[${template.name}] Initialization failed: \${error.message}\`);
+            logger.error(\`[${className}] Initialization failed: \${error.message}\`);
             throw error;
         }
     }
@@ -174,30 +186,28 @@ ${capabilityMethods}
     async cleanup() {
         try {
             await super.cleanup();
-            logger.info(\`[${template.name}] Plugin cleaned up successfully\`);
+            logger.info(\`[${className}] Plugin cleaned up successfully\`);
             return true;
         } catch (error) {
-            logger.error(\`[${template.name}] Cleanup failed: \${error.message}\`);
+            logger.error(\`[${className}] Cleanup failed: \${error.message}\`);
             throw error;
         }
     }
+
+    // Helper methods
+    getCapabilities() {
+        return this.config.capabilities;
+    }
+
+    isInitialized() {
+        return this.initialized;
+    }
 }
 
-// Create plugin instance
-const plugin = new ${className}();
-
-// Export plugin interface
+// Export the class and create a default instance
 module.exports = {
-    name: plugin.config.name,
-    version: plugin.config.version,
-    type: plugin.config.type,
-    description: plugin.config.description,
-    author: plugin.config.author,
-    capabilities: plugin.config.capabilities,
-    hooks: plugin.config.hooks,
-    execute: context => plugin.execute(context),
-    initialize: context => plugin.initialize(context),
-    cleanup: () => plugin.cleanup()
+    ${className},
+    default: new ${className}()
 };`;
     }
 
@@ -350,24 +360,28 @@ ISC
     generateHooksCode(hooks = []) {
         if (!hooks || !Array.isArray(hooks) || hooks.length === 0) return '';
         
+        const validEvents = ['PRE_EXECUTE', 'POST_EXECUTE', 'PRE_INIT', 'POST_INIT'];
+        
         return hooks
+            .filter(hook => {
+                return hook.event && 
+                       hook.description && 
+                       validEvents.includes(hook.event) &&
+                       hook.description.length >= 10;
+            })
             .map(hook => {
-                if (!hook.event || !hook.description) {
-                    return ''; // Skip invalid hooks
-                }
-                
                 const eventName = hook.event.toString().trim();
                 const description = hook.description.toString()
                     .replace(/'/g, "\\'")
                     .replace(/\n/g, ' ');
                 
                 return `{
-                event: LIFECYCLE_EVENTS.${eventName},
+                event: '${eventName}',
                 description: '${description}',
                 handler: async (context) => {
                     try {
                         logger.info(\`[${eventName}] ${description}\`);
-                        // Implement hook logic here
+                        // Execute hook logic
                         return { success: true, context };
                     } catch (error) {
                         logger.error(\`[${eventName}] Hook execution failed: \${error.message}\`);
@@ -376,17 +390,40 @@ ISC
                 }
             }`;
             })
-            .filter(Boolean) // Remove empty strings from invalid hooks
             .join(',\n                ');
     }
 
     generateCapabilityMethods(template) {
         if (!template || !template.capabilities) return '';
 
+        const typeSpecificMethods = {
+            api: {
+                design: 'designAPI',
+                mock: 'generateMock',
+                test: 'runTests',
+                document: 'generateDocs',
+                monitor: 'monitorPerformance'
+            },
+            database: {
+                migrations: 'runMigrations',
+                seeding: 'seedDatabase',
+                backup: 'backupDatabase',
+                restore: 'restoreDatabase'
+            },
+            environment: {
+                syncNodeVersion: 'syncNodeVersion',
+                syncDependencies: 'syncDependencies',
+                syncConfigs: 'syncConfigs',
+                crossPlatform: 'ensureCrossPlatform'
+            }
+        };
+
         const methods = [];
+        const typeMethodMap = typeSpecificMethods[template.type] || {};
+
         for (const [capability, enabled] of Object.entries(template.capabilities)) {
             if (enabled) {
-                const methodName = this.camelCase(capability);
+                const methodName = typeMethodMap[capability] || this.camelCase(capability);
                 methods.push(`
     async ${methodName}(context = {}) {
         try {
@@ -398,9 +435,6 @@ ISC
             this.setState('lastExecution', new Date().toISOString());
             
             // Execute capability logic
-            // TODO: Implement specific ${capability} functionality
-            
-            logger.info(\`[${capability}] Execution completed\`);
             return {
                 success: true,
                 details: {

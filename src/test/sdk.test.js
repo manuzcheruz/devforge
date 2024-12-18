@@ -6,6 +6,8 @@ describe('Plugin SDK', () => {
     const validApiTemplate = {
         type: 'api',
         name: 'test-api-plugin',
+        version: '1.0.0',
+        description: 'A test API plugin for development purposes',
         capabilities: {
             design: true,
             mock: true,
@@ -16,7 +18,7 @@ describe('Plugin SDK', () => {
         hooks: [
             {
                 event: 'PRE_EXECUTE',
-                description: 'Pre-execution validation'
+                description: 'Validates the execution context before plugin runs'
             }
         ]
     };
@@ -24,12 +26,20 @@ describe('Plugin SDK', () => {
     const validDatabaseTemplate = {
         type: 'database',
         name: 'test-db-plugin',
+        version: '1.0.0',
+        description: 'A comprehensive database management plugin',
         capabilities: {
             migrations: true,
             seeding: true,
             backup: true,
             restore: true
-        }
+        },
+        hooks: [
+            {
+                event: 'PRE_EXECUTE',
+                description: 'Validates database connection and configuration'
+            }
+        ]
     };
 
     beforeEach(() => {

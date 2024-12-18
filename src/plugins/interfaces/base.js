@@ -49,16 +49,34 @@ class Plugin {
     constructor(config) {
         this.validateConfig(config);
         this.config = config;
-        this.hooks = new Map();
         this.state = new Map();
         this.initialized = false;
+        this.eventEmitter = new PluginEventEmitter();
         
-        // Register hooks if provided
-        if (config.hooks) {
-            for (const hook of config.hooks) {
-                this.registerHook(hook.event, hook.handler);
+        // Register event subscriptions if provided
+        if (config.subscriptions) {
+            for (const subscription of config.subscriptions) {
+                this.eventEmitter.on(subscription.event, async (payload) => {
+                    try {
+                        await subscription.handler.call(this, payload);
+                    } catch (error) {
+                        await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.ERROR, {
+                            error,
+                            event: subscription.event,
+                            context: payload
+                        });
+                    }
+                });
             }
         }
+
+        // Initialize plugin metrics
+        this.setState('metrics', {
+            eventExecutions: 0,
+            successfulExecutions: 0,
+            failedExecutions: 0,
+            lastExecution: null
+        });
     }
 
     validateConfig(config) {
@@ -177,13 +195,45 @@ class Plugin {
         if (this.initialized) return;
 
         try {
-            await this.executeHooks(LIFECYCLE_EVENTS.PRE_INIT, context);
-            // Plugin-specific initialization logic should be implemented by child classes
+            // Emit pre-init event
+            await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.PRE_INIT, {
+                pluginName: this.config.name,
+                context
+            });
+
+            // Plugin-specific initialization logic
             await this.onInitialize?.(context);
-            await this.executeHooks(LIFECYCLE_EVENTS.POST_INIT, context);
+
             this.initialized = true;
+
+            // Emit post-init event
+            await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.POST_INIT, {
+                pluginName: this.config.name,
+                context,
+                success: true
+            });
+
+            // Update metrics
+            const metrics = await this.getState('metrics');
+            metrics.successfulExecutions++;
+            metrics.lastExecution = new Date().toISOString();
+            await this.setState('metrics', metrics);
+
+            return true;
         } catch (error) {
-            await this.executeHooks(LIFECYCLE_EVENTS.ERROR, { error });
+            await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.ERROR, {
+                pluginName: this.config.name,
+                error,
+                phase: 'initialization',
+                context
+            });
+
+            // Update error metrics
+            const metrics = await this.getState('metrics');
+            metrics.failedExecutions++;
+            metrics.lastExecution = new Date().toISOString();
+            await this.setState('metrics', metrics);
+
             throw error;
         }
     }
@@ -194,13 +244,47 @@ class Plugin {
         }
 
         try {
-            await this.executeHooks(LIFECYCLE_EVENTS.PRE_EXECUTE, context);
-            // Plugin-specific execution logic should be implemented by child classes
+            // Emit pre-execute event
+            await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.PRE_EXECUTE, {
+                pluginName: this.config.name,
+                context
+            });
+
+            // Plugin-specific execution logic
             const result = await this.onExecute?.(context);
-            await this.executeHooks(LIFECYCLE_EVENTS.POST_EXECUTE, { ...context, result });
+
+            // Emit post-execute event
+            await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.POST_EXECUTE, {
+                pluginName: this.config.name,
+                context,
+                result,
+                success: true
+            });
+
+            // Update success metrics
+            const metrics = await this.getState('metrics');
+            metrics.eventExecutions++;
+            metrics.successfulExecutions++;
+            metrics.lastExecution = new Date().toISOString();
+            await this.setState('metrics', metrics);
+
             return result;
         } catch (error) {
-            await this.executeHooks(LIFECYCLE_EVENTS.ERROR, { error });
+            // Emit error event
+            await this.eventEmitter.emitAsync(LIFECYCLE_EVENTS.ERROR, {
+                pluginName: this.config.name,
+                error,
+                phase: 'execution',
+                context
+            });
+
+            // Update error metrics
+            const metrics = await this.getState('metrics');
+            metrics.eventExecutions++;
+            metrics.failedExecutions++;
+            metrics.lastExecution = new Date().toISOString();
+            await this.setState('metrics', metrics);
+
             throw error;
         }
     }

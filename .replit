@@ -79,6 +79,10 @@ args = "DevForge Plugin Test"
 task = "workflow.run"
 args = "SDK Test"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Plugin Core Test"
+
 [[workflows.workflow]]
 name = "CLI Test"
 author = "agent"
@@ -316,6 +320,20 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "NODE_ENV=test jest src/test/sdk.test.js --verbose"
+
+[[workflows.workflow]]
+name = "Plugin Core Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "NODE_ENV=test jest src/test/plugin-core.test.js --verbose"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]
