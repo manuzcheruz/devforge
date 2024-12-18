@@ -157,7 +157,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js analyze"
+args = "node src/test/plugin-system.js"
 
 [[workflows.workflow]]
 name = "Documentation Check"

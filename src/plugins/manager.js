@@ -1,5 +1,10 @@
+const { z } = require('zod');
+const { LIFECYCLE_EVENTS } = require('./interfaces/base');
+const { logger } = require('../utils/logger');
+
 class PluginManager {
     constructor() {
+        // Core plugin categories
         this.plugins = {
             environment: new Map(),
             api: new Map(),
@@ -8,6 +13,8 @@ class PluginManager {
             security: new Map(),
             database: new Map()
         };
+        
+        // Plugin system metadata
         this.supportedCategories = new Set([
             'environment',
             'api',
@@ -16,105 +23,206 @@ class PluginManager {
             'security',
             'database'
         ]);
+        
+        // Plugin management structures
         this.dependencies = new Map(); // Track plugin dependencies
         this.lifecycleHooks = new Map(); // Store plugin lifecycle hooks
         this.pluginRegistry = new Map(); // Store plugin metadata
         this.versionCache = new Map(); // Cache resolved versions
+        
+        // Initialize global hooks
+        this.globalHooks = Object.values(LIFECYCLE_EVENTS).reduce((acc, event) => {
+            acc.set(event, []);
+            return acc;
+        }, new Map());
     }
 
     async register(category, plugin) {
         try {
-            // Validate plugin structure
+            logger.info(`Registering plugin ${plugin.name} in category ${category}`);
+            
+            // Enhanced plugin validation
             this.validatePlugin(plugin);
             
-            // Check category
+            // Category validation with detailed error
             if (!this.supportedCategories.has(category)) {
                 throw new Error(`Invalid category: ${category}. Supported categories are: ${Array.from(this.supportedCategories).join(', ')}`);
             }
 
-            // Initialize category if needed
+            // Ensure category exists
             if (!this.plugins[category]) {
                 this.plugins[category] = new Map();
             }
 
-            // Validate version and update registry
+            // Version validation
             if (!this.validateVersion(plugin.version)) {
                 throw new Error(`Invalid version format for plugin ${plugin.name}: ${plugin.version}`);
             }
 
-            // Store plugin metadata
+            // Check for existing plugin
+            if (this.plugins[category].has(plugin.name)) {
+                throw new Error(`Plugin ${plugin.name} is already registered in category ${category}`);
+            }
+
+            // Register plugin metadata
             this.pluginRegistry.set(plugin.name, {
                 category,
                 version: plugin.version,
                 capabilities: plugin.capabilities || {},
-                lastUpdated: new Date()
+                lastUpdated: new Date(),
+                status: 'active'
             });
 
-            // Store plugin dependencies
+            // Handle dependencies
             if (plugin.dependencies) {
+                await this.validateDependencies(plugin);
                 this.dependencies.set(plugin.name, plugin.dependencies);
             }
 
-            // Register lifecycle hooks if present
+            // Register lifecycle hooks
             if (plugin.hooks) {
-                this.lifecycleHooks.set(plugin.name, plugin.hooks);
+                await this.registerPluginHooks(plugin);
             }
 
-            // Register the plugin
+            // Initialize plugin if it has initialize method
+            if (typeof plugin.initialize === 'function') {
+                await plugin.initialize();
+            }
+
+            // Register the plugin instance
             this.plugins[category].set(plugin.name, plugin);
 
+            logger.info(`Successfully registered plugin ${plugin.name}`);
             return true;
         } catch (error) {
-            console.error(`Failed to register plugin ${plugin.name}:`, error);
+            logger.error(`Failed to register plugin ${plugin.name}:`, error);
             throw error;
         }
     }
 
+    // Enhanced plugin validation with Zod schema
     validatePlugin(plugin) {
-        if (!plugin || typeof plugin !== 'object') {
-            throw new Error('Plugin must be an object');
-        }
+        const pluginSchema = z.object({
+            name: z.string().min(1).refine(val => /^[a-z0-9-]+$/.test(val), {
+                message: "Plugin name must contain only lowercase letters, numbers, and hyphens"
+            }),
+            version: z.string().regex(/^\d+\.\d+\.\d+$/, {
+                message: "Version must follow semantic versioning (e.g., 1.0.0)"
+            }),
+            type: z.enum(['api', 'database', 'environment', 'security']),
+            description: z.string().min(10).optional(),
+            author: z.string().min(1).optional(),
+            capabilities: z.record(z.boolean()),
+            dependencies: z.array(z.object({
+                name: z.string(),
+                version: z.string().regex(/^(\d+\.\d+\.\d+|>=?\d+\.\d+\.\d+|<=?\d+\.\d+\.\d+|\^?\d+\.\d+\.\d+|\~\d+\.\d+\.\d+)$/, {
+                    message: "Invalid version format. Use semantic versioning with optional ^, ~, >, <, >= or <= prefix"
+                })
+            })).optional(),
+            hooks: z.array(z.object({
+                event: z.enum(Object.values(LIFECYCLE_EVENTS)),
+                handler: z.function(),
+                global: z.boolean().optional()
+            })).optional(),
+            initialize: z.function().optional(),
+            execute: z.function(),
+            cleanup: z.function().optional(),
+            config: z.record(z.unknown()).optional()
+        });
 
-        // Required fields
-        const required = ['name', 'version', 'execute'];
-        for (const field of required) {
-            if (!plugin[field]) {
-                throw new Error(`Plugin missing required field: ${field}`);
+        try {
+            const validationResult = pluginSchema.safeParse(plugin);
+            if (!validationResult.success) {
+                const errors = validationResult.error.errors.map(err => 
+                    `${err.path.join('.')}: ${err.message}`
+                ).join('\n');
+                throw new Error(`Invalid plugin configuration:\n${errors}`);
             }
+
+            // Additional validation for capabilities based on plugin type
+            this.validatePluginCapabilities(plugin);
+
+            return true;
+        } catch (error) {
+            throw new Error(`Plugin validation failed: ${error.message}`);
+        }
+    }
+
+    validatePluginCapabilities(plugin) {
+        const requiredCapabilities = {
+            api: ['design', 'mock', 'test', 'document', 'monitor'],
+            database: ['migrations', 'seeding', 'backup', 'restore'],
+            environment: ['syncNodeVersion', 'syncDependencies', 'syncConfigs', 'crossPlatform'],
+            security: ['dependencyScan', 'codeScan', 'configScan', 'reportGeneration']
+        };
+
+        const required = requiredCapabilities[plugin.type];
+        if (!required) return;
+
+        const missing = required.filter(cap => 
+            !plugin.capabilities || typeof plugin.capabilities[cap] !== 'boolean'
+        );
+
+        if (missing.length > 0) {
+            throw new Error(
+                `Missing required capabilities for ${plugin.type} plugin: ${missing.join(', ')}`
+            );
+        }
+    }
+
+    // Improved hook registration
+    async registerPluginHooks(plugin) {
+        if (!plugin.hooks || !Array.isArray(plugin.hooks)) {
+            return;
         }
 
-        // Type validations
-        if (typeof plugin.name !== 'string') {
-            throw new Error('Plugin name must be a string');
-        }
-        if (typeof plugin.version !== 'string') {
-            throw new Error('Plugin version must be a string');
-        }
-        if (typeof plugin.execute !== 'function') {
-            throw new Error('Plugin execute must be a function');
-        }
-
-        // Validate dependencies if present
-        if (plugin.dependencies) {
-            if (!Array.isArray(plugin.dependencies)) {
-                throw new Error('Plugin dependencies must be an array');
-            }
-            for (const dep of plugin.dependencies) {
-                if (!dep.name || !dep.version) {
-                    throw new Error('Invalid dependency format. Must include name and version');
+        const registeredHooks = [];
+        for (const hook of plugin.hooks) {
+            try {
+                if (!Object.values(LIFECYCLE_EVENTS).includes(hook.event)) {
+                    throw new Error(`Invalid hook event: ${hook.event}`);
                 }
+
+                // Store hook in plugin-specific hooks
+                if (!this.lifecycleHooks.has(plugin.name)) {
+                    this.lifecycleHooks.set(plugin.name, []);
+                }
+                this.lifecycleHooks.get(plugin.name).push(hook);
+
+                // Add to global hooks if specified
+                if (hook.global) {
+                    this.globalHooks.get(hook.event).push({
+                        pluginName: plugin.name,
+                        handler: hook.handler
+                    });
+                }
+
+                registeredHooks.push(hook.event);
+            } catch (error) {
+                logger.error(`Failed to register hook ${hook.event} for plugin ${plugin.name}:`, error);
+                throw error;
             }
         }
 
-        // Validate hooks if present
-        if (plugin.hooks) {
-            if (!Array.isArray(plugin.hooks)) {
-                throw new Error('Plugin hooks must be an array');
+        logger.info(`Registered hooks for plugin ${plugin.name}: ${registeredHooks.join(', ')}`);
+    }
+
+    // Enhanced dependency validation
+    async validateDependencies(plugin) {
+        if (!plugin.dependencies) return;
+
+        for (const dep of plugin.dependencies) {
+            const dependencyPlugin = this.findPluginByName(dep.name);
+            
+            if (!dependencyPlugin) {
+                throw new Error(`Required dependency ${dep.name} not found`);
             }
-            for (const hook of plugin.hooks) {
-                if (!hook.event || typeof hook.handler !== 'function') {
-                    throw new Error('Invalid hook format. Must include event and handler function');
-                }
+
+            if (!this.isVersionCompatible(dependencyPlugin.version, dep.version)) {
+                throw new Error(
+                    `Version mismatch for dependency ${dep.name}: ` +
+                    `requires ${dep.version}, found ${dependencyPlugin.version}`
+                );
             }
         }
     }
@@ -256,18 +364,56 @@ class PluginManager {
         return resolve(pluginName);
     }
 
-    isVersionCompatible(actual, required) {
+    async isVersionCompatible(actual, required) {
         const semver = require('semver');
-        return semver.satisfies(actual, required);
+        
+        // Handle version range specifiers
+        if (required.startsWith('^') || required.startsWith('~') || 
+            required.startsWith('>') || required.startsWith('<')) {
+            return semver.satisfies(actual, required);
+        }
+        
+        // For exact version matches
+        if (semver.valid(required)) {
+            return semver.eq(actual, required);
+        }
+
+        throw new Error(`Invalid version requirement: ${required}`);
     }
 
     findPluginByName(name) {
+        // First check version cache
+        if (this.versionCache.has(name)) {
+            return this.versionCache.get(name);
+        }
+
+        // Search through all categories
         for (const category of Object.values(this.plugins)) {
             if (category.has(name)) {
-                return category.get(name);
+                const plugin = category.get(name);
+                // Cache the result
+                this.versionCache.set(name, plugin);
+                return plugin;
             }
         }
         return null;
+    }
+
+    async findCompatibleVersion(pluginName, requiredVersion) {
+        const plugin = this.findPluginByName(pluginName);
+        if (!plugin) {
+            throw new Error(`Plugin ${pluginName} not found`);
+        }
+
+        const isCompatible = await this.isVersionCompatible(plugin.version, requiredVersion);
+        if (!isCompatible) {
+            throw new Error(
+                `No compatible version found for ${pluginName}. ` +
+                `Required: ${requiredVersion}, Found: ${plugin.version}`
+            );
+        }
+
+        return plugin;
     }
     compareVersions(v1, v2) {
         const normalize = v => v.split('.').map(Number);
