@@ -270,86 +270,8 @@ class ProjectAnalyzer {
         }
     }
 
-    generateRecommendations(metrics = {}) {
-        logger.info('Generating project recommendations...');
-
-        try {
-            // Ensure we have a properly structured metrics object with all required properties
-            const defaultMetrics = {
-                quality: {
-                    documentation: {
-                        hasReadme: false,
-                        hasApiDocs: false,
-                        readmeQuality: 0,
-                        coverage: 0,
-                        issues: []
-                    },
-                    testCoverage: {
-                        lines: 0,
-                        functions: 0,
-                        branches: 0,
-                        statements: 0
-                    },
-                    maintainabilityIndex: 70,
-                    issues: []
-                },
-                complexity: {
-                    cyclomaticComplexity: {
-                        average: 0,
-                        highest: 0
-                    }
-                },
-                performance: {
-                    bundleSize: {
-                        raw: 0,
-                        formatted: '0 B'
-                    }
-                },
-                security: {
-                    hasPackageLock: false,
-                    issues: []
-                },
-                structure: {
-                    hasTests: false
-                }
-            };
-
-            // Create a complete metrics object by merging with defaults
-            const analysisMetrics = {
-                quality: {
-                    ...defaultMetrics.quality,
-                    ...(metrics.quality || {}),
-                    documentation: {
-                        ...defaultMetrics.quality.documentation,
-                        ...((metrics.quality && metrics.quality.documentation) || {})
-                    },
-                    testCoverage: {
-                        ...defaultMetrics.quality.testCoverage,
-                        ...((metrics.quality && metrics.quality.testCoverage) || {})
-                    }
-                },
-                complexity: {
-                    ...defaultMetrics.complexity,
-                    ...(metrics.complexity || {})
-                },
-                performance: {
-                    ...defaultMetrics.performance,
-                    ...(metrics.performance || {})
-                },
-                security: {
-                    ...defaultMetrics.security,
-                    ...(metrics.security || {})
-                },
-                structure: {
-                    ...defaultMetrics.structure,
-                    ...(metrics.structure || {})
-                }
-            };
-
-            logger.info('Analyzing metrics for recommendations...');
-
-        // Define complete default metrics structure
-        const defaultMetrics = {
+    initializeMetrics() {
+        return {
             quality: {
                 documentation: {
                     hasReadme: false,
@@ -391,153 +313,96 @@ class ProjectAnalyzer {
                 hasTests: false
             }
         };
+    }
 
-        // Ensure metrics has a quality object
-        if (!metrics.quality) {
-            metrics.quality = {};
-        }
+    safelyMergeMetrics(defaultMetrics, inputMetrics) {
+        const result = { ...defaultMetrics };
 
-        // Ensure all required nested objects exist with defaults
-        if (!metrics.quality.documentation) {
-            metrics.quality.documentation = { ...defaultMetrics.quality.documentation };
-        }
-        if (!metrics.quality.testCoverage) {
-            metrics.quality.testCoverage = { ...defaultMetrics.quality.testCoverage };
-        }
-        if (!metrics.quality.linting) {
-            metrics.quality.linting = { ...defaultMetrics.quality.linting };
+        if (!inputMetrics || typeof inputMetrics !== 'object') {
+            return result;
         }
 
-        // Deep merge metrics with defaults
-        const analysisMetrics = {
-            quality: {
-                ...defaultMetrics.quality,
-                ...(metrics.quality || {}),
+        // Safely merge quality metrics
+        if (inputMetrics.quality) {
+            result.quality = {
+                ...result.quality,
+                ...inputMetrics.quality,
                 documentation: {
-                    ...defaultMetrics.quality.documentation,
-                    ...((metrics.quality && metrics.quality.documentation) || {})
+                    ...result.quality.documentation,
+                    ...(inputMetrics.quality.documentation || {})
                 },
                 testCoverage: {
-                    ...defaultMetrics.quality.testCoverage,
-                    ...((metrics.quality && metrics.quality.testCoverage) || {})
+                    ...result.quality.testCoverage,
+                    ...(inputMetrics.quality.testCoverage || {})
                 },
                 linting: {
-                    ...defaultMetrics.quality.linting,
-                    ...((metrics.quality && metrics.quality.linting) || {})
+                    ...result.quality.linting,
+                    ...(inputMetrics.quality.linting || {})
                 }
-            },
-            complexity: {
-                ...defaultMetrics.complexity,
-                ...(metrics.complexity || {}),
-                cyclomaticComplexity: {
-                    ...defaultMetrics.complexity.cyclomaticComplexity,
-                    ...((metrics.complexity && metrics.complexity.cyclomaticComplexity) || {})
-                }
-            },
-            performance: {
-                ...defaultMetrics.performance,
-                ...(metrics.performance || {}),
-                bundleSize: {
-                    ...defaultMetrics.performance.bundleSize,
-                    ...((metrics.performance && metrics.performance.bundleSize) || {})
-                }
-            },
-            security: {
-                ...defaultMetrics.security,
-                ...(metrics.security || {})
-            },
-            structure: {
-                ...defaultMetrics.structure,
-                ...(metrics.structure || {})
-            }
-        };
+            };
+        }
 
-        // Initialize recommendations object
-        const recommendations = {
-            documentation: [],
-            quality: [],
-            security: [],
-            performance: [],
-            complexity: []
-        };
+        // Safely merge complexity metrics
+        if (inputMetrics.complexity) {
+            result.complexity = {
+                ...result.complexity,
+                ...inputMetrics.complexity,
+                cyclomaticComplexity: {
+                    ...result.complexity.cyclomaticComplexity,
+                    ...(inputMetrics.complexity.cyclomaticComplexity || {})
+                }
+            };
+        }
+
+        // Safely merge performance metrics
+        if (inputMetrics.performance) {
+            result.performance = {
+                ...result.performance,
+                ...inputMetrics.performance,
+                bundleSize: {
+                    ...result.performance.bundleSize,
+                    ...(inputMetrics.performance.bundleSize || {})
+                }
+            };
+        }
+
+        // Safely merge security and structure metrics
+        if (inputMetrics.security) {
+            result.security = {
+                ...result.security,
+                ...inputMetrics.security
+            };
+        }
+
+        if (inputMetrics.structure) {
+            result.structure = {
+                ...result.structure,
+                ...inputMetrics.structure
+            };
+        }
+
+        return result;
+    }
+
+    generateRecommendations(metrics = {}) {
+        logger.info('Generating project recommendations...');
 
         try {
-            // Ensure we have a properly structured metrics object with all required properties
-            const defaultMetrics = {
-                quality: {
-                    documentation: {
-                        hasReadme: false,
-                        hasApiDocs: false,
-                        readmeQuality: 0,
-                        coverage: 0,
-                        issues: []
-                    },
-                    testCoverage: {
-                        lines: 0,
-                        functions: 0,
-                        branches: 0,
-                        statements: 0
-                    },
-                    maintainabilityIndex: 70,
-                    issues: []
-                },
-                complexity: {
-                    cyclomaticComplexity: {
-                        average: 0,
-                        highest: 0
-                    }
-                },
-                performance: {
-                    bundleSize: {
-                        raw: 0,
-                        formatted: '0 B'
-                    }
-                },
-                security: {
-                    hasPackageLock: false,
-                    issues: []
-                },
-                structure: {
-                    hasTests: false
-                }
+            const recommendations = {
+                documentation: [],
+                quality: [],
+                security: [],
+                performance: [],
+                complexity: []
             };
 
-            // Create a complete metrics object by merging with defaults
-            const analysisMetrics = {
-                quality: {
-                    ...defaultMetrics.quality,
-                    ...(metrics.quality || {}),
-                    documentation: {
-                        ...defaultMetrics.quality.documentation,
-                        ...((metrics.quality && metrics.quality.documentation) || {})
-                    },
-                    testCoverage: {
-                        ...defaultMetrics.quality.testCoverage,
-                        ...((metrics.quality && metrics.quality.testCoverage) || {})
-                    }
-                },
-                complexity: {
-                    ...defaultMetrics.complexity,
-                    ...(metrics.complexity || {})
-                },
-                performance: {
-                    ...defaultMetrics.performance,
-                    ...(metrics.performance || {})
-                },
-                security: {
-                    ...defaultMetrics.security,
-                    ...(metrics.security || {})
-                },
-                structure: {
-                    ...defaultMetrics.structure,
-                    ...(metrics.structure || {})
-                }
-            };
+            const defaultMetrics = this.initializeMetrics();
+            const analysisMetrics = this.safelyMergeMetrics(defaultMetrics, metrics);
 
             logger.info('Analyzing metrics for recommendations...');
-        
-            // Documentation recommendations
-            if (!analysisMetrics.quality.documentation.hasReadme) {
+
+            // Documentation checks
+            if (!analysisMetrics.quality?.documentation?.hasReadme) {
                 recommendations.documentation.push({
                     type: 'missing-docs',
                     severity: 'medium',
@@ -545,16 +410,17 @@ class ProjectAnalyzer {
                 });
             }
 
-            if (analysisMetrics.quality.documentation.coverage < 50) {
+            const docCoverage = analysisMetrics.quality?.documentation?.coverage ?? 0;
+            if (docCoverage < 50) {
                 recommendations.documentation.push({
                     type: 'low-coverage',
                     severity: 'medium',
-                    message: `Low documentation coverage (${analysisMetrics.quality.documentation.coverage}%). Consider adding JSDoc comments.`
+                    message: `Low documentation coverage (${docCoverage}%). Consider adding JSDoc comments.`
                 });
             }
 
-            // Structure recommendations
-            if (analysisMetrics.structure.hasTests === false) {
+            // Structure checks
+            if (!analysisMetrics.structure?.hasTests) {
                 recommendations.quality.push({
                     type: 'missing-tests',
                     severity: 'high',
@@ -562,26 +428,29 @@ class ProjectAnalyzer {
                 });
             }
 
-            // Complexity recommendations
-            if (analysisMetrics.complexity.cyclomaticComplexity.average > 15) {
+            // Complexity checks
+            const avgComplexity = analysisMetrics.complexity?.cyclomaticComplexity?.average ?? 0;
+            if (avgComplexity > 15) {
                 recommendations.complexity.push({
-                    type: 'complexity',
+                    type: 'high-complexity',
                     severity: 'medium',
-                    message: `High average complexity (${analysisMetrics.complexity.cyclomaticComplexity.average}). Consider breaking down complex functions.`
+                    message: `High average complexity (${avgComplexity}). Consider breaking down complex functions.`
                 });
             }
 
-            // Performance recommendations
-            if (analysisMetrics.performance.bundleSize.raw > 1000000) {
+            // Performance checks
+            const bundleSize = analysisMetrics.performance?.bundleSize?.raw ?? 0;
+            const bundleSizeFormatted = analysisMetrics.performance?.bundleSize?.formatted ?? '0 B';
+            if (bundleSize > 1000000) {
                 recommendations.performance.push({
-                    type: 'bundle-size',
+                    type: 'large-bundle',
                     severity: 'medium',
-                    message: `Large bundle size (${analysisMetrics.performance.bundleSize.formatted || '1MB+'}). Consider code splitting.`
+                    message: `Large bundle size (${bundleSizeFormatted}). Consider code splitting or tree shaking.`
                 });
             }
 
-            // Security recommendations
-            if (analysisMetrics.security.hasPackageLock === false) {
+            // Security checks
+            if (!analysisMetrics.security?.hasPackageLock) {
                 recommendations.security.push({
                     type: 'missing-lock',
                     severity: 'high',
@@ -589,16 +458,16 @@ class ProjectAnalyzer {
                 });
             }
 
-            // Test coverage recommendations
-            if (analysisMetrics.quality.testCoverage.lines < 60 || analysisMetrics.quality.testCoverage.functions < 60) {
+            // Test coverage checks
+            const testCoverage = analysisMetrics.quality?.testCoverage?.lines ?? 0;
+            if (testCoverage < 60) {
                 recommendations.quality.push({
-                    type: 'test-coverage',
+                    type: 'low-test-coverage',
                     severity: 'medium',
-                    message: `Low test coverage (Lines: ${analysisMetrics.quality.testCoverage.lines}%, Functions: ${analysisMetrics.quality.testCoverage.functions}%). Add more tests.`
+                    message: `Low test coverage (${testCoverage}%). Add more tests to improve code reliability.`
                 });
             }
 
-            // Return recommendations if we have any
             const hasRecommendations = Object.values(recommendations).some(arr => arr.length > 0);
             return hasRecommendations ? recommendations : {};
         } catch (error) {

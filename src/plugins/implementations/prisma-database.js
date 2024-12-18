@@ -1,4 +1,5 @@
-const { DatabasePlugin } = require('../interfaces/database');
+const { DatabasePlugin, DATABASE_ACTIONS } = require('../interfaces/database');
+const { LIFECYCLE_EVENTS } = require('../interfaces/base');
 const { execSync } = require('child_process');
 const fs = require('fs').promises;
 const path = require('path');
@@ -10,37 +11,38 @@ class PrismaDatabasePlugin extends DatabasePlugin {
             name: 'core-prisma-database',
             version: '1.0.0',
             type: 'database',
+            description: 'Prisma database plugin for NodeForge',
+            author: 'NodeForge',
             capabilities: {
                 migrations: true,
                 seeding: true,
                 backup: true,
                 restore: true
             },
-            execute: async ({ action, context = {} }) => {
-                try {
-                    switch (action) {
-                        case 'migrate':
-                            return await this.migrate(context);
-                        case 'seed':
-                            return await this.seed(context);
-                        case 'backup':
-                            return await this.backup(context);
-                        case 'restore':
-                            return await this.restore(context);
-                        default:
-                            throw new Error(`Unsupported action: ${action}`);
+            hooks: [
+                {
+                    event: LIFECYCLE_EVENTS.PRE_EXECUTE,
+                    handler: async (context) => {
+                        logger.info(`Starting Prisma operation: ${context.action}`);
                     }
-                } catch (error) {
-                    logger.error(`Plugin execution failed: ${error.message}`);
-                    return {
-                        success: false,
-                        details: {
-                            issues: [error.message]
-                        }
-                    };
+                },
+                {
+                    event: LIFECYCLE_EVENTS.POST_EXECUTE,
+                    handler: async (context) => {
+                        logger.info(`Completed Prisma operation: ${context.action}`);
+                    }
+                },
+                {
+                    event: LIFECYCLE_EVENTS.ERROR,
+                    handler: async (context) => {
+                        logger.error(`Prisma operation failed: ${context.error.message}`);
+                    }
                 }
-            }
+            ]
         });
+
+        // Initialize plugin state
+        this.setState('lastMigration', null);
     }
 
     async migrate(context = {}) {

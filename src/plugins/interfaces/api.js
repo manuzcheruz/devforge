@@ -1,44 +1,74 @@
 const { z } = require('zod');
+const { Plugin, LIFECYCLE_EVENTS } = require('./base');
 
-// API Plugin Interface Schema
+// API specific actions
+const API_ACTIONS = {
+    DESIGN: 'design',
+    MOCK: 'mock',
+    TEST: 'test',
+    DOCUMENT: 'document',
+    MONITOR: 'monitor'
+};
+
+// API Plugin Interface Schema extends base plugin schema
 const apiPluginSchema = z.object({
-    name: z.string(),
-    version: z.string(),
-    type: z.enum(['api']),
+    type: z.literal('api'),
     capabilities: z.object({
         design: z.boolean(),
         mock: z.boolean(),
         test: z.boolean(),
         document: z.boolean(),
         monitor: z.boolean()
-    }),
-    execute: z.function()
-        .args(z.object({
-            action: z.enum(['design', 'mock', 'test', 'document', 'monitor']),
-            context: z.object({
-                projectPath: z.string(),
-                apiSpec: z.unknown().optional(),
-                endpoints: z.array(z.unknown()).optional(),
-                testConfig: z.unknown().optional()
-            }).optional()
-        }))
-        .returns(z.promise(z.object({
-            success: z.boolean(),
-            details: z.object({
-                endpoints: z.array(z.unknown()).optional(),
-                coverage: z.number().optional(),
-                documentation: z.unknown().optional(),
-                metrics: z.record(z.unknown()).optional(),
-                issues: z.array(z.string()).optional()
-            })
-        })))
+    })
 });
 
-class APIPlugin {
+// API Context Schema
+const apiContextSchema = z.object({
+    action: z.enum(Object.values(API_ACTIONS)),
+    projectPath: z.string(),
+    apiSpec: z.unknown().optional(),
+    endpoints: z.array(z.unknown()).optional(),
+    testConfig: z.unknown().optional()
+});
+
+class APIPlugin extends Plugin {
     constructor(config) {
-        this.config = apiPluginSchema.parse(config);
+        // Validate API-specific configuration
+        apiPluginSchema.parse(config);
+        super(config);
+        
+        // Register default hooks
+        this.registerHook(LIFECYCLE_EVENTS.PRE_EXECUTE, this.validateContext.bind(this));
     }
 
+    async validateContext(context) {
+        try {
+            return apiContextSchema.parse(context);
+        } catch (error) {
+            throw new Error(`Invalid API context: ${error.message}`);
+        }
+    }
+
+    async onExecute(context) {
+        const { action } = context;
+
+        switch (action) {
+            case API_ACTIONS.DESIGN:
+                return this.designAPI(context);
+            case API_ACTIONS.MOCK:
+                return this.generateMock(context);
+            case API_ACTIONS.TEST:
+                return this.runTests(context);
+            case API_ACTIONS.DOCUMENT:
+                return this.generateDocs(context);
+            case API_ACTIONS.MONITOR:
+                return this.monitorPerformance(context);
+            default:
+                throw new Error(`Unsupported API action: ${action}`);
+        }
+    }
+
+    // Abstract methods to be implemented by concrete API plugins
     async designAPI(context) {
         throw new Error('designAPI must be implemented by plugin');
     }
@@ -58,9 +88,25 @@ class APIPlugin {
     async monitorPerformance(context) {
         throw new Error('monitorPerformance must be implemented by plugin');
     }
+
+    // Helper methods for API plugins
+    validateEndpoint(endpoint) {
+        // Common endpoint validation logic
+        if (!endpoint.path || !endpoint.method) {
+            throw new Error('Endpoint must have path and method');
+        }
+    }
+
+    validateAPISpec(spec) {
+        // Common OpenAPI spec validation logic
+        if (!spec.openapi && !spec.swagger) {
+            throw new Error('Invalid OpenAPI specification');
+        }
+    }
 }
 
 module.exports = {
     APIPlugin,
-    apiPluginSchema
+    apiPluginSchema,
+    API_ACTIONS
 };
