@@ -11,8 +11,8 @@ class PrismaDatabasePlugin extends DatabasePlugin {
             name: 'core-prisma-database',
             version: '1.0.0',
             type: 'database',
-            description: 'Prisma database plugin for NodeForge',
-            author: 'NodeForge',
+            description: 'Prisma database plugin for DevForge',
+            author: 'DevForge',
             capabilities: {
                 migrations: true,
                 seeding: true,

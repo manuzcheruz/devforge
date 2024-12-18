@@ -1,9 +1,9 @@
 {
-  "name": "nodetoolforge",
+  "name": "devforge",
   "version": "1.0.0",
   "main": "index.js",
   "bin": {
-    "nodetoolforge": "bin/nodeforge.js"
+    "devforge": "bin/devforge.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -1,7 +1,7 @@
 {
   "name": "test-local-project",
   "version": "1.0.0",
-  "description": "A Node.js project created with NodeForge",
+  "description": "A Node.js project created with DevForge",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

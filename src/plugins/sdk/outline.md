@@ -1,12 +1,12 @@
-# NodeForge Plugin Development SDK
+# DevForge Plugin Development SDK
 
 ## Overview
-The NodeForge Plugin SDK enables developers to extend the functionality of NodeForge through custom plugins. This document provides comprehensive guidance on developing plugins using the SDK.
+The DevForge Plugin SDK enables developers to extend the functionality of DevForge through custom plugins. This document provides comprehensive guidance on developing plugins using the SDK.
 
 ## Core Concepts
 
 ### 1. Plugin Architecture
-Every plugin in NodeForge is built on a robust architecture that includes:
+Every plugin in DevForge is built on a robust architecture that includes:
 
 - **Base Plugin Interface**: Core functionality and lifecycle management
 - **Specialized Interfaces**: Type-specific implementations (API, Database, Environment)
@@ -185,7 +185,7 @@ class MyPlugin extends Plugin {
 - Write comprehensive unit tests
 - Test all lifecycle methods
 - Validate error scenarios
-- Test with different NodeForge versions
+- Test with different DevForge versions
 
 ### 3. Distribution
 - Package plugins as npm modules

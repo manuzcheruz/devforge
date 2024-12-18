@@ -146,8 +146,8 @@ class PluginSDK {
 
     generatePluginCode(template) {
         // Validate and prepare template data
-        const description = template.description || `A ${template.type} plugin for NodeForge`;
-        const author = template.author || 'NodeForge';
+        const description = template.description || `A ${template.type} plugin for DevForge`;
+        const author = template.author || 'DevForge';
         const className = this.getClassName(template.name);
         const baseClass = this.getBaseClass(template.type);
         
@@ -315,7 +315,7 @@ describe('${className}', () => {
         return `# ${this.getClassName(template.name)}
 
 ## Overview
-A ${template.type} plugin for NodeForge that provides ${Object.keys(template.capabilities).join(', ')} capabilities.
+A ${template.type} plugin for DevForge that provides ${Object.keys(template.capabilities).join(', ')} capabilities.
 
 ## Installation
 \`\`\`bash

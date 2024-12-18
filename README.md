@@ -5,7 +5,8 @@ A comprehensive Node.js development workflow automation tool that standardizes p
 ## Features
 
 - 🚀 Template-based Project Generation
-- 🔌 Plugin Management System
+- 🔌 Plugin Management System with SDK
+- 🏪 Community Template Marketplace
 - 📊 Project Analysis Tools
 - 🔄 Remote Template Support
 - 🛠️ Customizable Configuration
@@ -68,213 +69,192 @@ devforge analyze --performance --async        # Check async patterns
 devforge analyze --performance --bundle       # Check bundle size
 ```
 
-## Project Analysis Features
+## Plugin SDK
 
-### Code Quality Analysis
+The Plugin SDK provides a powerful event-driven architecture for extending DevForge's functionality.
 
-The analysis tool provides comprehensive insights into your project's code quality:
+### Creating a Plugin
 
-#### Quality Metrics:
-- **Maintainability Index (0-100)**
-  - Code organization and structure
-  - Documentation coverage and quality
-  - Complexity metrics integration
-  - Naming conventions adherence
-  - Error handling practices
-  - Code duplication analysis
-  - Comment quality and coverage
+```javascript
+const { Plugin } = require('@devforge/sdk');
 
-- **Code Issues Detection**
-  - Line length violations (>100 characters)
-  - Empty catch blocks detection
-  - Console statement usage in production
-  - Magic numbers identification
-  - TODO comments tracking
-  - Nested complexity warnings
-  - Error handling coverage
-  - Duplicate code sections
+class MyCustomPlugin extends Plugin {
+  constructor() {
+    super({
+      name: 'my-custom-plugin',
+      version: '1.0.0',
+      type: 'api',
+      capabilities: {
+        design: true,
+        mock: true,
+        test: true
+      }
+    });
+  }
 
-- **Best Practices Analysis**
-  - ESLint configuration validation
-  - Prettier formatting checks
-  - Git hooks implementation
-  - Package.json structure
-  - Development dependencies audit
-  - Code organization patterns
+  async onInitialize(context) {
+    // Plugin initialization logic
+    await this.registerHook('preExecute', this.validateInput);
+  }
+
+  async validateInput(context) {
+    // Input validation logic
+    return context;
+  }
+
+  async onExecute(context) {
+    // Main plugin logic
+    return { success: true };
+  }
+}
+```
+
+### Plugin Types and Capabilities
+
+```javascript
+// Available plugin types
+const pluginTypes = [
+  'api',        // API development tools
+  'database',   // Database management
+  'environment',// Environment configuration
+  'security'    // Security scanning
+];
+
+// Capability examples by type
+const capabilities = {
+  api: {
+    design: true,     // API design and structure
+    mock: true,       // Mock data generation
+    test: true,       // Testing utilities
+    document: true,   // Documentation generation
+    monitor: true     // Performance monitoring
+  },
+  database: {
+    migrations: true, // Schema migrations
+    seeding: true,    // Data seeding
+    backup: true,     // Database backups
+    restore: true     // Restoration features
+  }
+};
+```
+
+### Plugin Lifecycle Events
+
+```javascript
+// Register lifecycle hooks
+await plugin.registerHook('preInit', async (context) => {
+  // Pre-initialization logic
+});
+
+await plugin.registerHook('postExecute', async (result) => {
+  // Post-execution processing
+});
+
+// Available lifecycle events
+const LIFECYCLE_EVENTS = [
+  'preInit',     // Before initialization
+  'postInit',    // After initialization
+  'preExecute',  // Before execution
+  'postExecute', // After execution
+  'error',       // Error handling
+  'cleanup'      // Resource cleanup
+];
+```
+
+## Template Marketplace
+
+DevForge includes a built-in marketplace for discovering and sharing templates.
+
+### Using the Marketplace
+
+```bash
+# Search for templates
+devforge search "api template"
+
+# Install template
+devforge install -t express-api-advanced
+
+# Publish template
+devforge publish ./my-template
+
+# Update template
+devforge update -t express-api-advanced
+```
+
+### Template Management API
+
+```javascript
+const { MarketplaceManager } = require('@devforge/marketplace');
+
+// Initialize marketplace
+const marketplace = new MarketplaceManager();
+
+// Publish template
+await marketplace.publishTemplate({
+  name: 'my-template',
+  version: '1.0.0',
+  description: 'Custom API template',
+  author: 'DevForge Team',
+  type: 'project',
+  compatibility: {
+    nodeVersion: '>=14',
+    devforgeVersion: '>=1.0.0'
+  }
+});
+
+// Search templates
+const results = await marketplace.searchTemplates('api', {
+  type: 'project',
+  tags: ['typescript', 'rest'],
+  sort: 'downloads'
+});
+
+// Download template
+await marketplace.downloadTemplate('template-name', 'latest');
+```
+
+## Analysis Tools
 
 ### Performance Analysis
 
 ```bash
-# Run performance analysis
+# Run comprehensive performance analysis
 devforge analyze --performance
+
+# Specific performance aspects
+devforge analyze --performance --async    # Analyze async patterns
+devforge analyze --performance --memory   # Memory usage analysis
+devforge analyze --performance --cpu      # CPU profiling
+devforge analyze --performance --network  # Network performance
+devforge analyze --performance --database # Database query analysis
 ```
 
-#### Bundle Analysis
-- **Bundle Size Metrics**
-  - Raw bundle size measurement
-  - Gzipped size estimation
-  - Individual chunk analysis
-  - External dependencies size
-  - Tree-shaking effectiveness
-  - Code splitting analysis
-  - Dynamic import usage
+### Code Quality Metrics
 
-#### Async Patterns Analysis
-- **Promise Usage**
-  - Promise chain patterns
-  - Error handling coverage
-  - Async/await usage ratio
-  - Promise.all optimizations
-  - Concurrent operations
-  - Memory leak prevention
-
-- **Callback Patterns**
-  - Callback depth analysis
-  - Promise conversion opportunities
-  - Event emitter usage
-  - Memory management
-  - Error propagation
-
-- **Event Loop Analysis**
-  - Microtask queue usage
-  - Task scheduling patterns
-  - Timer usage optimization
-  - I/O operation handling
-  - Event loop blocking detection
-
-### Test Coverage Analysis
-
-Comprehensive test coverage analysis with detailed metrics:
+The analysis tool provides detailed insights into:
 
 ```bash
-# Full test coverage analysis
-devforge analyze --coverage
+# Run code quality analysis
+devforge analyze --quality
 
-# Specific coverage checks
-devforge analyze --coverage --unit       # Unit test coverage
-devforge analyze --coverage --integration # Integration test coverage
-devforge analyze --coverage --summary     # Coverage summary
+# Specific quality checks
+devforge analyze --quality --maintainability # Maintainability index
+devforge analyze --quality --complexity     # Cyclomatic complexity
+devforge analyze --quality --duplication    # Code duplication
+devforge analyze --quality --coverage       # Test coverage
 ```
 
-#### Coverage Metrics:
-- **Code Coverage Analysis**
-  - Lines coverage percentage
-  - Functions coverage percentage
-  - Branches coverage percentage
-  - Statements coverage percentage
-  - Class methods coverage
-
-- **Test Suite Analytics**
-  - Total test count and distribution
-  - Passed/failed/skipped ratio
-  - Test execution time tracking
-  - Test suite organization
-  - Mock coverage tracking
-  - Assertion density metrics
-
-### Documentation Analysis
+### Security Analysis
 
 ```bash
-# Analyze documentation coverage
-devforge analyze --documentation
+# Run security analysis
+devforge analyze --security
+
+# Specific security checks
+devforge analyze --security --dependencies  # Dependency vulnerabilities
+devforge analyze --security --staticAnalysis # Static code analysis
+devforge analyze --security --secretsScan   # Secrets scanning
 ```
-
-Analyzes:
-- README.md presence and quality
-- API documentation coverage
-- JSDoc comments coverage
-- Code comments ratio
-- Documentation structure
-- Example code presence
-- Usage instructions
-- Contributing guidelines
-
-## Template System
-
-### Built-in Templates
-
-- `express-api`: Express.js REST API
-  - Variants: minimal, standard, full
-  - TypeScript support
-  - OpenAPI documentation
-  - Testing setup included
-
-- `fastify-api`: Fastify REST API
-  - High-performance focus
-  - TypeScript support
-  - Swagger documentation
-  - Automated testing
-
-- `graphql-api`: GraphQL API
-  - Apollo Server setup
-  - Type definitions
-  - Resolver structure
-  - Testing framework
-
-- `cli-tool`: Command Line Tool
-  - Commander.js integration
-  - Interactive prompts
-  - Color output support
-  - Testing utilities
-
-### Template Variables
-
-Common variables supported by templates:
-```javascript
-{
-  "port": "3000",
-  "useTypescript": false,
-  "includeDocs": true,
-  "includeTests": true,
-  "dockerize": false,
-  "apiPrefix": "/api/v1",
-  "serverName": "development",
-  "logLevel": "info"
-}
-```
-
-### Remote Templates
-
-Use any Git repository as a template:
-```bash
-devforge init -n my-project --url https://github.com/username/repo.git
-```
-
-Version control support:
-```bash
-# Use specific version
-devforge init -n my-project --url <repo-url> --version v1.2.3
-
-# Use specific branch
-devforge init -n my-project --url <repo-url> --version develop
-```
-
-## Plugin Development
-
-### Plugin Structure
-```typescript
-interface Plugin {
-  name: string;
-  version: string;
-  hooks: {
-    beforeInit?: () => void;
-    afterInit?: () => void;
-    beforeAnalysis?: () => void;
-    afterAnalysis?: () => void;
-  };
-  methods: {
-    [key: string]: (...args: any[]) => any;
-  };
-}
-```
-
-### Creating a Plugin
-
-1. Create a new directory with plugin files
-2. Implement the Plugin interface
-3. Add plugin configuration
-4. Test plugin functionality
-5. Publish to npm (optional)
 
 ## Contributing
 

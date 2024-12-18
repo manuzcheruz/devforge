@@ -124,7 +124,7 @@ async function createProjectStructure(projectPath, template) {
         const packageJson = {
             name: path.basename(projectPath),
             version: '1.0.0',
-            description: `A Node.js project created with NodeForge`,
+            description: `A Node.js project created with DevForge`,
             main: 'src/index.js',
             scripts: {
                 start: 'node src/index.js',
@@ -241,7 +241,7 @@ function generateReadme(template, projectName) {
     return `# ${projectName}
 
 ## Description
-A Node.js project created with NodeForge
+A Node.js project created with DevForge
 
 ## Setup
 1. Install dependencies:

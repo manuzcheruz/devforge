@@ -11,7 +11,7 @@ class OpenAPIGeneratorPlugin extends APIPlugin {
             version: '1.0.0',
             type: 'api',
             description: 'OpenAPI specification generator and validator',
-            author: 'NodeForge',
+            author: 'DevForge',
             capabilities: {
                 design: true,
                 mock: true,

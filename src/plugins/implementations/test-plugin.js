@@ -8,8 +8,8 @@ class TestPlugin extends APIPlugin {
             name: 'core-test-plugin',
             version: '1.0.0',
             type: 'api',
-            description: 'A comprehensive test plugin for NodeForge development and validation',
-            author: 'NodeForge',
+            description: 'A comprehensive test plugin for DevForge development and validation',
+            author: 'DevForge',
             capabilities: {
                 design: true,
                 mock: true,

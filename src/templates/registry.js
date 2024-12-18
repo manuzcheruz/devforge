@@ -5,7 +5,7 @@ const { logger } = require('../utils/logger');
 class TemplateRegistry {
     constructor() {
         this.templates = new Map();
-        this.registryPath = path.join(process.cwd(), '.nodeforge', 'registry.json');
+        this.registryPath = path.join(process.cwd(), '.devforge', 'registry.json');
     }
 
     async initialize() {
@@ -45,7 +45,7 @@ class TemplateRegistry {
             // Read template configuration if exists
             let templateConfig = {};
             try {
-                const configPath = path.join(template.path, 'nodeforge.json');
+                const configPath = path.join(template.path, 'devforge.json');
                 const configContent = await fs.readFile(configPath, 'utf-8');
                 templateConfig = JSON.parse(configContent);
             } catch {

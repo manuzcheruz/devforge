@@ -9,8 +9,8 @@ class SecurityScannerPlugin extends Plugin {
             name: 'core-security-scanner',
             version: '1.0.0',
             type: 'security',
-            description: 'Security scanning plugin for NodeForge',
-            author: 'NodeForge',
+            description: 'Security scanning plugin for DevForge',
+            author: 'DevForge',
             capabilities: {
                 dependencyScan: true,
                 codeScan: true,

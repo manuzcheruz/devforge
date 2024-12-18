@@ -2,7 +2,7 @@ const chalk = require('chalk');
 
 function formatTextReport(analysis) {
     const report = [
-        chalk.bold('NodeForge Project Analysis Report'),
+        chalk.bold('DevForge Project Analysis Report'),
         `Generated at: ${new Date().toLocaleString()}`,
         '\n'
     ];
