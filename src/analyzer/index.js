@@ -16,7 +16,14 @@ class ProjectAnalyzer {
             dependencies: {},
             quality: {
                 issues: [],
-                linting: {}
+                linting: {},
+                documentation: {
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                }
             },
             security: {},
             complexity: {
@@ -74,22 +81,13 @@ class ProjectAnalyzer {
             const [structure, dependencies, security, quality, performance, complexity] = 
                 await Promise.all(analysisPromises);
 
-            // Initialize documentation metrics with defaults
-            const documentation = await this.qualityAnalyzer.analyzeDocumentation(normalizedPath, fs) || {
-                hasReadme: false,
-                hasApiDocs: false,
-                readmeQuality: 0,
-                coverage: 0,
-                issues: []
-            };
-
             const analysisResults = {
                 structure,
                 dependencies,
                 security,
                 quality: {
                     ...quality,
-                    documentation: documentation || {
+                    documentation: quality.documentation || {
                         hasReadme: false,
                         hasApiDocs: false,
                         readmeQuality: 0,
@@ -127,7 +125,7 @@ class ProjectAnalyzer {
         };
 
         // Check documentation metrics
-        const documentation = metrics?.quality?.documentation || {
+        const documentation = metrics?.quality?.documentation ?? {
             hasReadme: false,
             hasApiDocs: false,
             readmeQuality: 0,

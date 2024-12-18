@@ -13,7 +13,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "CLI Test"
+args = "Test Runner"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
@@ -62,6 +62,18 @@ args = "Test Remote Template 2"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "Remote Template Test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "DevForge Core Test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "DevForge Analysis Test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "DevForge Plugin Test"
 
 [[workflows.workflow]]
 name = "CLI Test"
@@ -244,6 +256,48 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-remote-versioned --url https://github.com/expressjs/express.git --version 4.18.2"
+
+[[workflows.workflow]]
+name = "DevForge Core Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init -n test-devforge-project -t express-api -v minimal --vars \"port=3000,useTypescript=false\""
+
+[[workflows.workflow]]
+name = "DevForge Analysis Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "chmod +x bin/nodeforge.js && ./bin/nodeforge.js analyze"
+
+[[workflows.workflow]]
+name = "DevForge Plugin Test"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "NODE_ENV=test jest src/__tests__/analyzer/core.test.js --verbose"
 
 [deployment]
 run = ["sh", "-c", "chmod +x bin/nodeforge.js && ./bin/nodeforge.js init --help"]
