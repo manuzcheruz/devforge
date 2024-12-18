@@ -74,12 +74,28 @@ describe('Core Analyzer Functionality', () => {
       expect(typeof analysis.metrics.performance.bundleSize.raw).toBe('number');
     });
 
-    it('should detect async patterns', async () => {
+    it('should analyze async patterns', async () => {
       const analysis = await analyzer.analyzeProject(testProjectPath);
       expect(analysis.metrics.performance.asyncPatterns).toBeDefined();
       expect(typeof analysis.metrics.performance.asyncPatterns.promises).toBe('number');
       expect(typeof analysis.metrics.performance.asyncPatterns.asyncAwait).toBe('number');
       expect(typeof analysis.metrics.performance.asyncPatterns.callbacks).toBe('number');
+    });
+
+    it('should analyze memory usage', async () => {
+      const analysis = await analyzer.analyzeProject(testProjectPath);
+      expect(analysis.metrics.performance.memoryUsage).toBeDefined();
+      expect(typeof analysis.metrics.performance.memoryUsage.heapTotal).toBe('number');
+      expect(typeof analysis.metrics.performance.memoryUsage.heapUsed).toBe('number');
+      expect(analysis.metrics.performance.memoryUsage.formatted).toBeDefined();
+      expect(typeof analysis.metrics.performance.memoryUsage.formatted.heapTotal).toBe('string');
+    });
+
+    it('should analyze execution time metrics', async () => {
+      const analysis = await analyzer.analyzeProject(testProjectPath);
+      expect(analysis.metrics.performance.executionTime).toBeDefined();
+      expect(typeof analysis.metrics.performance.executionTime.averageResponseTime).toBe('string');
+      expect(typeof analysis.metrics.performance.executionTime.criticalPaths).toBe('object');
     });
   });
 });
