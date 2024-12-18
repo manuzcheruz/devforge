@@ -8,7 +8,7 @@ class QualityAnalyzer {
         }
 
         try {
-            // Initialize metrics object with default values
+            // Initialize default metrics object
             const metrics = {
                 linting: {
                     hasEslint: false,
@@ -18,7 +18,13 @@ class QualityAnalyzer {
                     hasJest: false,
                     hasMocha: false
                 },
-                documentation: await this.analyzeDocumentation(projectPath, fs),
+                documentation: {
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                },
                 maintainabilityIndex: 70, // Default value
                 issues: [],
                 fileAnalyses: [],

@@ -78,25 +78,38 @@ class ProjectAnalyzer {
                 this.analyzeComplexity(sourceFiles)
             ];
 
-            const [structure, dependencies, security, quality, performance, complexity] = 
+            // Process analysis results with proper error handling
+            const [structureResult, dependenciesResult, securityResult, qualityResult, performanceResult, complexityResult] = 
                 await Promise.all(analysisPromises);
 
-            const analysisResults = {
-                structure,
-                dependencies,
-                security,
-                quality: {
-                    ...quality,
-                    documentation: quality.documentation || {
-                        hasReadme: false,
-                        hasApiDocs: false,
-                        readmeQuality: 0,
-                        coverage: 0,
-                        issues: []
-                    }
+            // Ensure proper initialization of quality metrics with default values
+            const quality = {
+                issues: [],
+                linting: {},
+                documentation: {
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
                 },
-                performance,
-                complexity
+                maintainabilityIndex: 70,
+                testCoverage: {
+                    lines: 0,
+                    functions: 0,
+                    branches: 0,
+                    statements: 0
+                },
+                ...qualityResult
+            };
+
+            const analysisResults = {
+                structure: structureResult,
+                dependencies: dependenciesResult,
+                security: securityResult,
+                quality,
+                performance: performanceResult,
+                complexity: complexityResult
             };
 
             const projectRecommendations = this.generateRecommendations(analysisResults);
@@ -124,14 +137,28 @@ class ProjectAnalyzer {
             complexity: []
         };
 
-        // Check documentation metrics
-        const documentation = metrics?.quality?.documentation ?? {
-            hasReadme: false,
-            hasApiDocs: false,
-            readmeQuality: 0,
-            coverage: 0,
-            issues: []
+        // Ensure metrics objects are properly initialized
+        const qualityMetrics = metrics?.quality || {
+            issues: [],
+            linting: {},
+            documentation: {
+                hasReadme: false,
+                hasApiDocs: false,
+                readmeQuality: 0,
+                coverage: 0,
+                issues: []
+            },
+            maintainabilityIndex: 70,
+            testCoverage: {
+                lines: 0,
+                functions: 0,
+                branches: 0,
+                statements: 0
+            }
         };
+
+        // Use the initialized quality metrics
+        const documentation = qualityMetrics.documentation;
         
         if (!documentation.hasReadme) {
             recommendations.documentation.push({
@@ -189,13 +216,12 @@ class ProjectAnalyzer {
             });
         }
 
-        // Check code quality
-        const quality = metrics.quality || {};
-        if (quality.testCoverage && quality.testCoverage < 60) {
+        // Check code quality metrics
+        if (qualityMetrics.testCoverage && qualityMetrics.testCoverage < 60) {
             recommendations.quality.push({
                 type: 'test-coverage',
                 severity: 'medium',
-                message: `Low test coverage (${quality.testCoverage}%). Consider adding more tests.`
+                message: `Low test coverage (${qualityMetrics.testCoverage}%). Consider adding more tests.`
             });
         }
 
@@ -288,13 +314,40 @@ class ProjectAnalyzer {
                 this.qualityAnalyzer.analyzeTestCoverage(projectPath, fs)
             ]);
 
-            return {
+            // Ensure documentation is properly initialized
+            const quality = {
                 ...qualityMetrics,
-                testCoverage
+                testCoverage,
+                documentation: qualityMetrics?.documentation || {
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                }
             };
+
+            return quality;
         } catch (error) {
             logger.error(`Code quality analysis failed: ${error.message}`);
-            throw error;
+            // Return default structure on error
+            return {
+                issues: [],
+                linting: {},
+                documentation: {
+                    hasReadme: false,
+                    hasApiDocs: false,
+                    readmeQuality: 0,
+                    coverage: 0,
+                    issues: []
+                },
+                testCoverage: {
+                    lines: 0,
+                    functions: 0,
+                    branches: 0,
+                    statements: 0
+                }
+            };
         }
     }
 
