@@ -39,5 +39,7 @@ Thumbs.db
 coverage/
 
 # NodeSmith specific
-.nodesmith/
+.devforge/
+.replit
+replit*
 templates/**/node_modules/
